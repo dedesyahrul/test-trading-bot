@@ -1,0 +1,1 @@
+# Adapters __init__.py
