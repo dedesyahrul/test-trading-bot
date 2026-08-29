@@ -4,6 +4,8 @@ from app.api.market import router as market_router
 from app.api.bot import router as bot_router
 from app.api.backtest import router as backtest_router
 from app.api.portfolio import router as portfolio_router
+from app.api.settings import router as settings_router
+from app.api.statistics import router as statistics_router
 
 router = APIRouter()
 
@@ -13,6 +15,8 @@ router.include_router(market_router)
 router.include_router(bot_router)
 router.include_router(backtest_router)
 router.include_router(portfolio_router)
+router.include_router(settings_router)
+router.include_router(statistics_router)
 
 # Health check
 @router.get("/health")

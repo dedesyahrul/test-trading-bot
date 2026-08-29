@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
         debug=settings.DEBUG,
+        lifespan=lifespan,
     )
 
     # CORS middleware
@@ -42,17 +43,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Lifespan
-    app = FastAPI(
-        title=settings.APP_NAME,
-        version=settings.APP_VERSION,
-        debug=settings.DEBUG,
-        lifespan=lifespan,
-    )
-
     # Add routes
     from app.api import router as api_router
     app.include_router(api_router, prefix=settings.API_PREFIX)
+
+    # Add WebSocket endpoint
+    from app.websocket.manager import websocket_endpoint
+    app.websocket("/ws")(websocket_endpoint)
 
     return app
 
