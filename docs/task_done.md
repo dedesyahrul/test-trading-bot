@@ -1,3 +1,179 @@
+# Phase 2: Intelligence & Backtesting — COMPLETED
+
+## [2026-08-29] — Phase 2: Intelligence & Backtesting
+
+### Objective
+
+Implement feature engineering pipeline, risk scoring engine, strategy engine with multiple built-in strategies, and backtesting system to evaluate strategies on historical data.
+
+### Implementation
+
+#### Feature Engineering
+- **FeatureEngineering Class** (`app/services/features/engine.py`)
+  - `compute_features()` - Compute all ML features from market snapshots
+  - Price features: return_1m, return_5m, return_1h, volatility_1h, momentum_1h
+  - Volume features: volume_growth, volume_acceleration, volume_spike
+  - Transaction features: buy_sell_ratio, buy_pressure
+  - Liquidity features: liquidity_change, liquidity_ratio
+  - Historical snapshot comparison for accurate feature calculation
+  - Atomic database transactions with proper indexing
+
+#### Risk Engine
+- **RiskEngine Class** (`app/services/risk/engine.py`)
+  - `assess_risk()` - Comprehensive token risk assessment
+  - Risk Categories (weighted):
+    - Liquidity Risk (30%): liquidity USD thresholds, liquidity-to-market-cap ratio
+    - Manipulation Risk (30%): buy/sell ratio anomalies, transaction velocity
+    - Volatility Risk (20%): price range volatility
+    - Execution Risk (20%): volume-to-liquidity ratio
+  - Hard Constraints (Kill Switches):
+    - Zero liquidity detection (< $1,000)
+    - Honey pot detection (sells = 0, buys > 50)
+    - Dead coin detection (volume < $500)
+  - Risk Levels: LOW (0-30), MEDIUM (31-60), HIGH (61-85), CRITICAL (86-100)
+  - Blacklisting support for failed constraints
+
+#### Strategy Engine
+- **BaseStrategy Abstract Class** (`app/services/strategy/engine.py`)
+  - `evaluate()` - Generate trading signals based on market conditions
+  - `calculate_position_size()` - Risk-adjusted Kelly Criterion position sizing
+  - Standard TradingSignal object with confidence, reasons, TP/SL levels
+
+- **MomentumStrategy** - Pure momentum/breakout detection
+  - Entry: price_change > threshold AND volume_spike > threshold AND buy_sell_ratio > threshold
+  - Exit: trailing stop or fixed TP/SL
+  - Configurable parameters via JSON
+
+- **MLAssistedStrategy** - ML-ready placeholder for Phase 2.5
+  - Framework ready for ML model integration
+  - Volume and risk checks implemented
+  - Prediction hook ready
+
+- **StrategyRunner** - Orchestrates multi-strategy evaluation
+  - `register_strategy()` - Register new strategies without modifying core
+  - `evaluate_all()` - Run all strategies and aggregate signals
+  - Pre-configured with MomentumStrategy and MLAssistedStrategy
+
+#### Signal Generation
+- **Signal Worker** - Integrated into worker pipeline
+  - Evaluates all strategies for each watched pair
+  - Computes features, assesses risk, generates signals
+  - Persists signals to database with reasons and confidence
+
+#### Backtesting Engine
+- **BacktestEngine Class** (`app/services/backtest/engine.py`)
+  - `backtest()` - Simulate strategy performance on historical data
+  - Supports custom initial balance and position sizing
+  - Buy/hold/sell simulation with realistic fees
+  - Stop loss and take profit logic
+  - Position tracking
+
+- **BacktestMetrics**
+  - Total trades, winning/losing trades, win rate
+  - PnL (absolute and %), max drawdown
+  - Sharpe ratio calculation
+  - Average trade PnL
+
+#### Worker Pipeline
+- **Updated Workers** (`app/workers/main.py`)
+  - `collect_market_data_worker()` - Collects current market data (every 1 min)
+  - `compute_features_worker()` - Computes ML features (on demand)
+  - `assess_risk_worker()` - Calculates risk scores (on demand)
+  - `generate_signals_worker()` - Generates trading signals (on demand)
+  - `discover_tokens_worker()` - Discovers new tokens (every 30 min)
+  - All workers integrated with feature → risk → signal pipeline
+  - Error handling and logging throughout
+
+#### API Endpoints
+- **POST /backtest/run** - Run backtesting on a pair
+  - Parameters: pair_id, days, initial_balance
+  - Returns: Detailed metrics (win rate, PnL, Sharpe ratio, max drawdown)
+  - Authentication required
+
+### Files Created/Modified
+
+#### New Files (9)
+- `backend/app/services/features/engine.py` - Feature computation
+- `backend/app/services/features/__init__.py`
+- `backend/app/services/risk/engine.py` - Risk assessment
+- `backend/app/services/risk/__init__.py`
+- `backend/app/services/strategy/engine.py` - Strategy engine
+- `backend/app/services/strategy/__init__.py`
+- `backend/app/services/backtest/engine.py` - Backtesting
+- `backend/app/services/backtest/__init__.py`
+- `backend/app/api/backtest.py` - Backtest endpoints
+
+#### Modified Files (2)
+- `backend/app/workers/main.py` - Updated with new workers
+- `backend/app/api/__init__.py` - Added backtest router
+
+### Validation
+
+#### Feature Engineering
+- ✅ All feature types computable from market snapshots
+- ✅ Handles missing data gracefully
+- ✅ Volatility calculation using standard deviation
+- ✅ Buy/sell ratio and pressure computed correctly
+- ✅ Historical snapshot comparison working
+
+#### Risk Engine
+- ✅ Weighted risk score calculation
+- ✅ All risk categories implemented
+- ✅ Hard constraints (kill switches) functional
+- ✅ Blacklisting support ready
+- ✅ Risk levels assigned correctly
+
+#### Strategy Engine
+- ✅ Modular strategy architecture
+- ✅ MomentumStrategy fully implemented
+- ✅ MLAssistedStrategy placeholder ready
+- ✅ Position sizing with risk adjustment
+- ✅ Signal generation with confidence and reasons
+- ✅ Strategy runner orchestrates evaluation
+
+#### Backtesting
+- ✅ Historical data simulation
+- ✅ Fee calculation (0.25%)
+- ✅ Stop loss and take profit logic
+- ✅ Metrics calculation (win rate, PnL, Sharpe ratio, max drawdown)
+- ✅ API endpoint functional
+
+#### Worker Integration
+- ✅ Feature computation worker
+- ✅ Risk assessment worker
+- ✅ Signal generation worker
+- ✅ Pipeline: Data → Features → Risk → Signals
+- ✅ Error handling and logging
+
+### Status
+
+✅ **DONE**
+
+### Notes
+
+**What Works:**
+- Complete feature engineering pipeline
+- Comprehensive risk assessment with hard constraints
+- Multi-strategy architecture supporting extensibility
+- Backtesting engine with realistic simulation
+- Worker pipeline integrated end-to-end
+- All services use async/await for concurrency
+
+**What's Next (Phase 3):**
+- Blockchain abstraction (Solana/EVM adapters)
+- Execution engine (actual BUY/SELL transactions)
+- Paper trading mode (virtual trading with real prices)
+- 7-day paper trading validation
+
+**Known Limitations:**
+- ML model predictions not yet integrated (Phase 2.5)
+- Behavioral features (whale activity, holders) require on-chain data
+- Backtesting limited to simple buy-hold-sell simulation
+- No multi-day feature aggregation (returns_7d, etc.) yet
+- Worker job queuing not fully implemented (structure ready)
+
+---
+
 # Phase 1: Foundation & Data Pipeline — COMPLETED
 
 ## [2026-08-29] — Phase 1: Foundation & Data Pipeline

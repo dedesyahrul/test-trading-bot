@@ -4,8 +4,11 @@ from app.core.config import settings
 from app.core.database import async_session_maker
 from app.services import PairService, MarketDataService, TokenService, ChainService
 from app.adapters.dexscreener import DEXScreenerClient
+from app.services.features.engine import FeatureEngineering
+from app.services.risk.engine import RiskEngine
+from app.services.strategy.engine import strategy_runner
 from sqlalchemy import select
-from app.models import Pair
+from app.models import Pair, Signal
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -37,7 +40,7 @@ async def collect_market_data_worker(ctx):
                 normalized = DEXScreenerClient.normalize_pair_data(pair_data["pair"])
                 
                 # Save market snapshot
-                await MarketDataService.save_market_snapshot(
+                snapshot = await MarketDataService.save_market_snapshot(
                     session,
                     pair_id=pair.id,
                     price_usd=normalized.get("price_usd"),
@@ -50,16 +53,136 @@ async def collect_market_data_worker(ctx):
                     volume_1h_usd=normalized.get("volume", {}).get("h1"),
                     volume_24h_usd=normalized.get("volume", {}).get("h24"),
                     liquidity_usd=normalized.get("liquidity", {}).get("usd"),
+                    buy_count_24h=normalized.get("transactions", {}).get("h24", {}).get("buys"),
+                    sell_count_24h=normalized.get("transactions", {}).get("h24", {}).get("sells"),
                     market_cap_usd=normalized.get("market_cap_usd"),
                     fdv_usd=normalized.get("fdv_usd"),
                 )
                 logger.info(f"Market data saved for pair {pair.id}")
+                
+                # Enqueue feature computation
+                # (In production, would enqueue to ARQ job queue)
+                # await ctx.queue.enqueue(compute_features_worker, pair.id)
                 
             except Exception as e:
                 logger.error(f"Error collecting market data for pair {pair.id}: {e}")
                 continue
     
     logger.info("Market data collection worker completed")
+
+
+async def compute_features_worker(ctx, pair_id):
+    """Worker to compute ML features for a pair."""
+    logger.info(f"Computing features for pair {pair_id}")
+    
+    async with async_session_maker() as session:
+        try:
+            # Get latest market snapshot
+            latest_snapshot = await MarketDataService.get_latest_snapshot(session, pair_id)
+            if not latest_snapshot:
+                logger.warning(f"No market data for pair {pair_id}")
+                return
+            
+            # Compute features
+            feature = await FeatureEngineering.compute_features(
+                session,
+                pair_id,
+                latest_snapshot,
+            )
+            logger.info(f"Features computed for pair {pair_id}")
+            
+            # Enqueue risk assessment
+            # await ctx.queue.enqueue(assess_risk_worker, pair_id)
+            
+        except Exception as e:
+            logger.error(f"Error computing features for pair {pair_id}: {e}")
+
+
+async def assess_risk_worker(ctx, pair_id):
+    """Worker to assess token risk."""
+    logger.info(f"Assessing risk for pair {pair_id}")
+    
+    async with async_session_maker() as session:
+        try:
+            # Get latest market snapshot and features
+            latest_snapshot = await MarketDataService.get_latest_snapshot(session, pair_id)
+            if not latest_snapshot:
+                logger.warning(f"No market data for pair {pair_id}")
+                return
+            
+            # Assess risk
+            risk_assessment = await RiskEngine.assess_risk(
+                session,
+                pair_id,
+                latest_snapshot,
+            )
+            logger.info(f"Risk assessment completed for pair {pair_id}: {risk_assessment.risk_level}")
+            
+            # If not blacklisted, enqueue signal generation
+            # if not risk_assessment.is_blacklisted:
+            #     await ctx.queue.enqueue(generate_signals_worker, pair_id)
+            
+        except Exception as e:
+            logger.error(f"Error assessing risk for pair {pair_id}: {e}")
+
+
+async def generate_signals_worker(ctx, pair_id):
+    """Worker to generate trading signals."""
+    logger.info(f"Generating signals for pair {pair_id}")
+    
+    async with async_session_maker() as session:
+        try:
+            # Get latest data
+            latest_snapshot = await MarketDataService.get_latest_snapshot(session, pair_id)
+            if not latest_snapshot:
+                return
+            
+            # Get latest risk assessment
+            from sqlalchemy import desc, and_
+            from app.models import RiskAssessment, Feature
+            
+            result_risk = await session.execute(
+                select(RiskAssessment)
+                .where(RiskAssessment.pair_id == pair_id)
+                .order_by(desc(RiskAssessment.timestamp))
+                .limit(1)
+            )
+            risk_assessment = result_risk.scalars().first()
+            
+            result_feature = await session.execute(
+                select(Feature)
+                .where(Feature.pair_id == pair_id)
+                .order_by(desc(Feature.timestamp))
+                .limit(1)
+            )
+            feature = result_feature.scalars().first()
+            
+            # Run all strategies
+            signals_list = await strategy_runner.evaluate_all(
+                pair_id,
+                latest_snapshot,
+                feature,
+                risk_assessment,
+            )
+            
+            # Save signals to database
+            from app.models import Signal as SignalModel
+            for signal in signals_list:
+                db_signal = SignalModel(
+                    pair_id=signal.pair_id,
+                    strategy_id=signal.strategy_id,
+                    signal_type=signal.signal_type,
+                    confidence=signal.confidence,
+                    reasons_pro=signal.reasons_pro,
+                    reasons_contra=signal.reasons_contra,
+                )
+                session.add(db_signal)
+            
+            await session.commit()
+            logger.info(f"Signals generated for pair {pair_id}: {len(signals_list)} signal(s)")
+            
+        except Exception as e:
+            logger.error(f"Error generating signals for pair {pair_id}: {e}")
 
 
 async def discover_tokens_worker(ctx):
@@ -124,6 +247,30 @@ async def discover_tokens_worker(ctx):
             logger.error(f"Error in token discovery worker: {e}")
     
     logger.info("Token discovery worker completed")
+
+
+class WorkerSettings:
+    """ARQ worker settings."""
+    
+    functions = [
+        collect_market_data_worker,
+        compute_features_worker,
+        assess_risk_worker,
+        generate_signals_worker,
+        discover_tokens_worker,
+    ]
+    
+    cron_jobs = [
+        cron(collect_market_data_worker, second=0, minute=range(0, 60, 1)),  # Every minute
+        cron(discover_tokens_worker, second=0, minute=range(0, 60, 30)),  # Every 30 minutes
+    ]
+    
+    on_startup = None
+    on_shutdown = None
+    handle_signals = True
+    allow_abort_jobs = True
+    job_timeout = 600
+    keep_result_ttl = 86400
 
 
 class WorkerSettings:
