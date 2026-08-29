@@ -181,8 +181,85 @@ async def generate_signals_worker(ctx, pair_id):
             await session.commit()
             logger.info(f"Signals generated for pair {pair_id}: {len(signals_list)} signal(s)")
             
+            # Enqueue execution for BUY signals
+            # for signal in signals_list:
+            #     if signal.signal_type == "BUY":
+            #         await ctx.queue.enqueue(execute_buy_signal_worker, pair_id, signal.confidence, signal.target_tp, signal.target_sl)
+            
         except Exception as e:
             logger.error(f"Error generating signals for pair {pair_id}: {e}")
+
+
+async def execute_buy_signal_worker(ctx, pair_id, confidence, target_tp, target_sl):
+    """Worker to execute BUY signals."""
+    logger.info(f"Executing BUY signal for pair {pair_id}")
+    
+    async with async_session_maker() as session:
+        try:
+            from app.services.trading.engine import ExecutionEngine
+            from app.adapters.blockchain import SolanaJupiterAdapter
+            
+            # Get first wallet for now (Phase 3 simplified)
+            from app.models import Wallet
+            result = await session.execute(select(Wallet).limit(1))
+            wallet = result.scalars().first()
+            if not wallet:
+                logger.warning("No wallet found")
+                return
+            
+            # Initialize execution engine
+            blockchain_adapter = SolanaJupiterAdapter()
+            execution_engine = ExecutionEngine(
+                blockchain_adapter,
+                blockchain_adapter,
+                None,  # Wallet adapter
+                blockchain_adapter,
+            )
+            
+            # Execute BUY
+            position = await execution_engine.execute_buy(
+                session,
+                pair_id,
+                wallet.id,
+                confidence,
+                target_tp,
+                target_sl,
+            )
+            
+            if position:
+                logger.info(f"BUY executed successfully: position {position.id}")
+            else:
+                logger.warning(f"BUY execution failed for pair {pair_id}")
+            
+        except Exception as e:
+            logger.error(f"Error executing BUY signal: {e}")
+
+
+async def monitor_positions_worker(ctx):
+    """Worker to monitor open positions and check for TP/SL."""
+    logger.info("Monitoring open positions")
+    
+    async with async_session_maker() as session:
+        try:
+            from app.models import Position
+            from app.services.portfolio.service import PortfolioService
+            
+            # Get all open positions
+            result = await session.execute(
+                select(Position).where(Position.status == "OPEN")
+            )
+            open_positions = result.scalars().all()
+            
+            for position in open_positions:
+                try:
+                    await PortfolioService.update_position_prices(session, position.id)
+                except Exception as e:
+                    logger.error(f"Error monitoring position {position.id}: {e}")
+            
+            logger.info(f"Monitored {len(open_positions)} positions")
+            
+        except Exception as e:
+            logger.error(f"Error in position monitor worker: {e}")
 
 
 async def discover_tokens_worker(ctx):
@@ -257,11 +334,14 @@ class WorkerSettings:
         compute_features_worker,
         assess_risk_worker,
         generate_signals_worker,
+        execute_buy_signal_worker,
+        monitor_positions_worker,
         discover_tokens_worker,
     ]
     
     cron_jobs = [
         cron(collect_market_data_worker, second=0, minute=range(0, 60, 1)),  # Every minute
+        cron(monitor_positions_worker, second=0, minute=range(0, 60, 1)),  # Every minute
         cron(discover_tokens_worker, second=0, minute=range(0, 60, 30)),  # Every 30 minutes
     ]
     
