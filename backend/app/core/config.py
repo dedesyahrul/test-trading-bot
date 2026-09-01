@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # Trading
     TRADING_MODE: str = os.getenv("TRADING_MODE", "PAPER")  # PAPER or LIVE
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "")
     PAPER_INITIAL_BALANCE: float = float(os.getenv("PAPER_INITIAL_BALANCE", os.getenv("INITIAL_BALANCE", "100")))
     
     # Market Data

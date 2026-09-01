@@ -1,6 +1,8 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:17845/api'
+// Production Nginx proxies /api to the backend. Same-origin URLs work from
+// localhost, a VPS IP, and a domain without rebuilding per host.
+const API_URL = import.meta.env.VITE_API_URL || '/api'
 
 const apiClient = axios.create({
   baseURL: API_URL,

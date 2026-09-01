@@ -19,7 +19,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
   const maxReconnectAttempts = 5
   const reconnectDelay = 3000
 
-  const connect = (url: string = 'ws://localhost:17845/ws') => {
+  const connect = (url: string = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`) => {
     if (ws && connected.value) return
     manuallyDisconnected = false
 

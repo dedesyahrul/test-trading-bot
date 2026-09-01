@@ -259,7 +259,7 @@ onMounted(() => {
   loadBotStatus()
   loadStatistics()
   loadSystemStatus()
-  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:17845/ws'
+  const wsUrl = import.meta.env.VITE_WS_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
   wsStore.connect(wsUrl)
   wsStore.subscribe('POSITION_UPDATED')
   wsStore.subscribe('SIGNAL_GENERATED')

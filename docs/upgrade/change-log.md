@@ -24,6 +24,31 @@ The `db-migrate` service must show `Exited (0)` before backend and worker are co
 
 ## 2026-08-30 - Docker Desktop Auto-Start
 
+## 2026-08-30 - VPS Same-Origin API
+
+### Fixed
+
+- Production frontend no longer defaults API and WebSocket URLs to `localhost`.
+- Browser requests now use same-origin `/api` and `/ws`, routed by Nginx to the backend container.
+- This prevents public VPS browsers from interpreting `localhost` as the user's own computer and avoids Private Network Access/CORS failures.
+- Backend can additionally read `CORS_ORIGINS` as a comma-separated or JSON-like list for direct API access.
+
+### Deployment
+
+After changing this value, rebuild the production frontend because Vite embeds environment values during build:
+
+```bash
+docker compose -f docker-compose.prod.yml build frontend
+docker compose -f docker-compose.prod.yml up -d frontend
+```
+
+The production Dockerfile now accepts Vite build args, while empty values intentionally select same-origin `/api` and `/ws`.
+
+### Docker Build Fix
+
+- Production frontend now copies `frontend/nginx.conf` from inside its build context.
+- This fixes production image builds where the previous Dockerfile attempted to copy `infrastructure/docker/nginx.conf` from outside the frontend context.
+
 ### Added
 
 - Development runtime services now use `restart: unless-stopped`.

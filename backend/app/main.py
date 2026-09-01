@@ -90,7 +90,8 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityMiddleware)
 
     is_dev = settings.DEBUG or settings.ENVIRONMENT == "development"
-    cors_origins = ["*"] if is_dev else ["http://localhost:13456", "http://localhost"]
+    configured_origins = [origin.strip().strip('"') for origin in settings.CORS_ORIGINS.strip("[]").split(",") if origin.strip()]
+    cors_origins = ["*"] if is_dev else (configured_origins or ["http://localhost:13456", "http://localhost"])
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
