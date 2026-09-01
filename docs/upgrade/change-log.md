@@ -26,6 +26,23 @@ The `db-migrate` service must show `Exited (0)` before backend and worker are co
 
 ## 2026-08-30 - VPS Same-Origin API
 
+## 2026-08-30 - VPS Frontend Build Permissions
+
+### Fixed
+
+- Added `frontend/.dockerignore` so host `node_modules` and build artifacts are never copied into the Linux image.
+- Frontend production dependencies are installed inside the image with audit/funding prompts disabled.
+- Vite binary permissions are normalized before build and invoked with `npx --no-install`.
+
+### Deployment
+
+Rebuild the frontend without cache on the VPS:
+
+```bash
+docker compose -f docker-compose.prod.yml build --no-cache frontend
+docker compose -f docker-compose.prod.yml up -d frontend
+```
+
 ### Fixed
 
 - Production frontend no longer defaults API and WebSocket URLs to `localhost`.
