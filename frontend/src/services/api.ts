@@ -2,7 +2,9 @@ import axios from 'axios'
 
 // Production Nginx proxies /api to the backend. Same-origin URLs work from
 // localhost, a VPS IP, and a domain without rebuilding per host.
-const API_URL = import.meta.env.VITE_API_URL || '/api'
+const configuredApiUrl = import.meta.env.VITE_API_URL || ''
+const isRemoteHost = typeof window !== 'undefined' && !['localhost', '127.0.0.1'].includes(window.location.hostname)
+const API_URL = isRemoteHost && configuredApiUrl.includes('localhost') ? '/api' : (configuredApiUrl || '/api')
 
 const apiClient = axios.create({
   baseURL: API_URL,

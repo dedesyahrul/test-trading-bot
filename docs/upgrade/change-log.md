@@ -49,6 +49,8 @@ docker compose -f docker-compose.prod.yml up -d frontend
 - Browser requests now use same-origin `/api` and `/ws`, routed by Nginx to the backend container.
 - This prevents public VPS browsers from interpreting `localhost` as the user's own computer and avoids Private Network Access/CORS failures.
 - Backend can additionally read `CORS_ORIGINS` as a comma-separated or JSON-like list for direct API access.
+- Production Compose now forces empty Vite build args so a development `.env` cannot reintroduce `localhost` into the VPS bundle.
+- Frontend ignores a configured localhost API URL when opened from a remote host.
 
 ### Deployment
 
