@@ -114,6 +114,25 @@ class MarketSnapshot(Base):
     )
 
 
+class Candle(Base):
+    """Timestamped OHLCV candle used for chart intelligence."""
+    __tablename__ = "candles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pair_id = Column(UUID(as_uuid=True), ForeignKey("pairs.id"), nullable=False, index=True)
+    timeframe = Column(String(10), nullable=False, default="minute")
+    open = Column(Numeric(20, 8), nullable=False)
+    high = Column(Numeric(20, 8), nullable=False)
+    low = Column(Numeric(20, 8), nullable=False)
+    close = Column(Numeric(20, 8), nullable=False)
+    volume = Column(Numeric(20, 2))
+    timestamp = Column(DateTime, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("pair_id", "timeframe", "timestamp", name="uq_candle_pair_timeframe_timestamp"),
+    )
+
+
 class RiskAssessment(Base):
     __tablename__ = "risk_assessments"
 

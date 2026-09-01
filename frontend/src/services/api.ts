@@ -58,6 +58,12 @@ export const marketService = {
   getPairSignals: (pairId: string, limit?: number) =>
     apiClient.get(`/market/pairs/${pairId}/signals`, { params: { limit } }),
 
+  getChartIntelligence: (pairId: string, timeframe = 'minute') =>
+    apiClient.get(`/market/pairs/${pairId}/chart-intelligence`, { params: { timeframe } }),
+
+  getCandles: (pairId: string, timeframe = 'minute', limit = 100) =>
+    apiClient.get(`/market/pairs/${pairId}/candles`, { params: { timeframe, limit } }),
+
   watchPair: (pairId: string) =>
     apiClient.post(`/market/pairs/${pairId}/watch`),
 
@@ -112,6 +118,11 @@ export const auditService = {
 
 export const riskService = {
   getPortfolio: () => apiClient.get('/risk/portfolio'),
+}
+
+export const watchlistService = {
+  history: (params?: { page?: number; page_size?: number; search?: string; action?: string }) =>
+    apiClient.get('/watchlist/history', { params }),
 }
 
 export const portfolioService = {

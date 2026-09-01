@@ -2,9 +2,12 @@ import logging
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models import User, Chain, Token, Pair, MarketSnapshot
+from sqlalchemy.dialects.postgresql import insert
+from app.models import User, Chain, Token, Pair, MarketSnapshot, Candle
 from app.core.security import hash_password
 from decimal import Decimal
+from datetime import datetime, timedelta
+from sqlalchemy import desc
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +234,51 @@ class PairService:
 
 
 class MarketDataService:
+    @staticmethod
+    def aggregate_candles(candles: list[Candle], minutes: int) -> list[dict]:
+        """Aggregate stored one-minute OHLCV candles without inventing prices."""
+        if minutes <= 1:
+            return [{"timestamp": candle.timestamp, "open": candle.open, "high": candle.high, "low": candle.low, "close": candle.close, "volume": candle.volume or Decimal("0")} for candle in candles]
+        buckets: dict[datetime, list[Candle]] = {}
+        for candle in candles:
+            timestamp = candle.timestamp.replace(second=0, microsecond=0)
+            bucket = timestamp - timedelta(minutes=timestamp.minute % minutes)
+            buckets.setdefault(bucket, []).append(candle)
+        aggregated = []
+        for bucket, rows in sorted(buckets.items()):
+            rows.sort(key=lambda row: row.timestamp)
+            aggregated.append({"timestamp": bucket, "open": rows[0].open, "high": max(row.high for row in rows), "low": min(row.low for row in rows), "close": rows[-1].close, "volume": sum((row.volume or Decimal("0") for row in rows), Decimal("0"))})
+        return aggregated
+
+    @staticmethod
+    async def get_candles(session: AsyncSession, pair_id, timeframe: str = "minute", limit: int = 100) -> list[Candle]:
+        if timeframe in {"5m", "15m", "hour", "1h"}:
+            minute_candles = await MarketDataService.get_candles(session, pair_id, "minute", min(limit * (60 if timeframe in {"hour", "1h"} else int(timeframe[:-1])), 500))
+            minutes = 60 if timeframe in {"hour", "1h"} else int(timeframe[:-1])
+            aggregated = MarketDataService.aggregate_candles(minute_candles, minutes)
+            return aggregated[-limit:]  # type: ignore[return-value]
+        result = await session.execute(
+            select(Candle).where(Candle.pair_id == pair_id, Candle.timeframe == timeframe)
+            .order_by(Candle.timestamp.desc()).limit(limit)
+        )
+        return list(reversed(result.scalars().all()))
+
+    @staticmethod
+    async def save_candles(session: AsyncSession, pair_id, candles: list[dict], timeframe: str = "minute") -> int:
+        """Persist valid OHLCV candles without duplicating timestamps."""
+        values = []
+        for row in candles:
+            try:
+                timestamp = datetime.utcfromtimestamp(float(row["timestamp"]))
+                values.append({"pair_id": pair_id, "timeframe": timeframe, "open": Decimal(str(row["open"])), "high": Decimal(str(row["high"])), "low": Decimal(str(row["low"])), "close": Decimal(str(row["close"])), "volume": Decimal(str(row.get("volume", 0))), "timestamp": timestamp})
+            except Exception:
+                continue
+        if not values:
+            return 0
+        result = await session.execute(insert(Candle).values(values).on_conflict_do_nothing(constraint="uq_candle_pair_timeframe_timestamp"))
+        await session.commit()
+        return result.rowcount or 0
+
     @staticmethod
     async def save_market_snapshot(
         session: AsyncSession,

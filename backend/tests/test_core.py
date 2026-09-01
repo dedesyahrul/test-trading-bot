@@ -29,6 +29,7 @@ from app.services.decision_score import DecisionScoreService
 from app.services.trading.adaptive_exit import AdaptiveExitService
 from app.adapters.dexscreener import DEXScreenerClient
 from app.adapters.geckoterminal import GeckoTerminalClient
+from app.services.chart_intelligence import ChartIntelligence
 
 
 class FakeSnapshot:
@@ -165,3 +166,16 @@ def test_geckoterminal_normalizes_pool_shape():
     assert normalized["provider"] == "geckoterminal"
     assert normalized["pair_address"] == "pool-1"
     assert normalized["price_usd"] == Decimal("1.25")
+
+
+def test_chart_intelligence_requires_history():
+    result = ChartIntelligence.assess([])
+    assert result.entry_allowed is False
+    assert result.behavior == "INSUFFICIENT_DATA"
+
+
+def test_chart_intelligence_detects_bullish_candles():
+    candles = [FakeSnapshot(timestamp=datetime.utcnow() + timedelta(minutes=i), open=Decimal(str(1 + i * 0.01)), high=Decimal(str(1.02 + i * 0.01)), low=Decimal(str(0.99 + i * 0.01)), close=Decimal(str(1.01 + i * 0.01)), volume=1000) for i in range(25)]
+    result = ChartIntelligence.assess(candles)
+    assert result.trend == "BULLISH"
+    assert result.entry_allowed is True

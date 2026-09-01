@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 import httpx
+from datetime import datetime, timedelta
 
 from app.core.config import settings
 
@@ -19,6 +20,7 @@ class GeckoTerminalClient:
     def __init__(self) -> None:
         self.base_url = settings.GECKO_TERMINAL_API_URL.rstrip("/")
         self.timeout = 8
+        self._ohlcv_blocked_until: datetime | None = None
 
     async def _get(self, path: str, params: Optional[dict] = None) -> Any:
         try:
@@ -40,6 +42,25 @@ class GeckoTerminalClient:
         result = await self._get(f"/networks/{network}/pools/{pool_address}")
         item = (result or {}).get("data")
         return self.normalize_pool(item) if item else None
+
+    async def get_pool_ohlcv(self, network: str, pool_address: str, timeframe: str = "minute", limit: int = 100) -> list[dict]:
+        """Get timestamped OHLCV candles for a pool."""
+        if self._ohlcv_blocked_until and datetime.utcnow() < self._ohlcv_blocked_until:
+            return []
+        result = await self._get(
+            f"/networks/{network}/pools/{pool_address}/ohlcv/{timeframe}",
+            params={"aggregate": 1, "limit": min(limit, 100)},
+        )
+        if result is None:
+            # Avoid hammering a provider after a rate-limit response.
+            self._ohlcv_blocked_until = datetime.utcnow() + timedelta(minutes=1)
+        rows = ((result or {}).get("data") or {}).get("attributes", {}).get("ohlcv_list", [])
+        candles = []
+        for row in rows:
+            if len(row) < 6:
+                continue
+            candles.append({"timestamp": row[0], "open": row[1], "high": row[2], "low": row[3], "close": row[4], "volume": row[5]})
+        return candles
 
     @staticmethod
     def normalize_pool(item: dict) -> dict:

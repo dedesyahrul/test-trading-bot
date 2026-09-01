@@ -1,5 +1,6 @@
 import logging
 from decimal import Decimal
+from datetime import datetime
 from arq import cron
 from arq.connections import RedisSettings
 from app.core.config import settings
@@ -18,6 +19,7 @@ from app.services.risk.portfolio import PortfolioRiskService
 from app.adapters.geckoterminal import GeckoTerminalClient
 from app.services.decision_score import DecisionScoreService
 from app.services.trading.adaptive_exit import AdaptiveExitService
+from app.services.chart_intelligence import ChartIntelligence
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -160,6 +162,10 @@ async def _run_intelligence_pipeline(session, pair_id) -> None:
         return
 
     computed_feature = await FeatureEngineering.compute_features(session, pair_id, latest_snapshot)
+    candles = await MarketDataService.get_candles(session, pair_id)
+    chart = ChartIntelligence.assess(candles)
+    if not chart.entry_allowed and chart.trend != "UNKNOWN":
+        logger.warning("Chart gate blocked entry for %s: %s", pair_id, chart.behavior)
     logger.warning("Features ready for pair %s; assessing risk", pair_id)
     risk_assessment = await RiskEngine.assess_risk(
         session, pair_id, latest_snapshot, feature=computed_feature
@@ -203,15 +209,14 @@ async def _run_intelligence_pipeline(session, pair_id) -> None:
         )
         decision_record = TradeDecision(
             pair_id=pair_id, strategy_id=signal.strategy_id,
-            decision=risk_decision.decision if signal.signal_type == "BUY" else "WAIT",
+            decision=risk_decision.decision if signal.signal_type == "BUY" and (chart.entry_allowed or chart.trend == "UNKNOWN") else "WAIT",
             signal_type=signal.signal_type, confidence=signal.confidence,
             risk_score=risk_assessment.risk_score, risk_level=risk_assessment.risk_level,
             decision_score=decision_score,
             position_size_usd=risk_decision.size_usd, data_quality=quality.value,
             features={"volatility_1h": float(feature.volatility_1h) if feature and feature.volatility_1h else None},
-            reasons=signal.reasons_pro + signal.reasons_contra + risk_decision.reasons,
+            reasons=signal.reasons_pro + signal.reasons_contra + risk_decision.reasons + chart.reasons,
         )
-        session.add(decision_record)
         session.add(decision_record)
         await session.flush()
         decision_id = decision_record.id
@@ -235,7 +240,7 @@ async def _run_intelligence_pipeline(session, pair_id) -> None:
             },
         )
         SIGNALS_GENERATED.labels(signal_type=signal.signal_type).inc()
-        if signal.signal_type == "BUY" and risk_decision.decision in {"ALLOW", "REDUCE_SIZE"}:
+        if signal.signal_type == "BUY" and (chart.entry_allowed or chart.trend == "UNKNOWN") and risk_decision.decision in {"ALLOW", "REDUCE_SIZE"}:
             await _execute_buy_for_signal(session, signal, pair_id, risk_decision.size_usd, decision_id)
 
     await session.commit()
@@ -329,6 +334,15 @@ async def _collect_market_data_worker(ctx):
                     market_cap_usd=normalized.get("market_cap_usd"),
                     fdv_usd=normalized.get("fdv_usd"),
                 )
+                try:
+                    latest_candles = await MarketDataService.get_candles(session, pair.id, limit=1)
+                    candle_is_fresh = latest_candles and (datetime.utcnow() - latest_candles[-1].timestamp).total_seconds() < 300
+                    if not candle_is_fresh:
+                        candle_rows = await gecko_terminal_client.get_pool_ohlcv(pair.chain_id, pair.pair_address, timeframe="minute", limit=100)
+                        if candle_rows:
+                            await MarketDataService.save_candles(session, pair.id, candle_rows)
+                except Exception:
+                    logger.warning("Candle data unavailable for pair %s", pair.id)
                 logger.info(f"Market data saved for pair {pair.id}")
 
                 await EventPublisher.publish(

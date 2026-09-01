@@ -31,7 +31,7 @@ const router = useRouter(); const route = useRoute(); const authStore = useAuthS
 const menuOpen = ref(false)
 const isAuthenticated = computed(() => Boolean(authStore.token) && !['/login', '/register'].includes(route.path))
 const wsConnected = computed(() => wsStore.isConnected)
-const navItems = [{ to: '/', label: 'Overview', index: 1 }, { to: '/scanner', label: 'Scanner', index: 2 }, { to: '/positions', label: 'Positions', index: 3 }, { to: '/settings', label: 'Settings', index: 4 }, { to: '/audit', label: 'Audit', index: 5 }]
+const navItems = [{ to: '/', label: 'Overview', index: 1 }, { to: '/scanner', label: 'Scanner', index: 2 }, { to: '/positions', label: 'Positions', index: 3 }, { to: '/watchlist-history', label: 'Watch history', index: 4 }, { to: '/settings', label: 'Settings', index: 5 }, { to: '/audit', label: 'Audit', index: 6 }]
 const logout = () => { authStore.logout(); menuOpen.value = false; router.push('/login') }
 </script>
 

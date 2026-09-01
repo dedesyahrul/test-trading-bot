@@ -27,6 +27,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/token/:pairId',
+    name: 'TokenDetail',
+    component: () => import('../pages/TokenDetail.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/positions',
     name: 'Positions',
     component: () => import('../pages/Positions.vue'),
@@ -42,6 +48,12 @@ const routes = [
     path: '/audit',
     name: 'Audit',
     component: () => import('../pages/Audit.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/watchlist-history',
+    name: 'WatchlistHistory',
+    component: () => import('../pages/WatchlistHistory.vue'),
     meta: { requiresAuth: true }
   },
 ]

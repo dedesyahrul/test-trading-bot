@@ -9,6 +9,7 @@ from app.api.statistics import router as statistics_router
 from app.api.system import router as system_router
 from app.api.audit import router as audit_router
 from app.api.risk import router as risk_router
+from app.api.watchlist import router as watchlist_router
 
 router = APIRouter()
 
@@ -23,6 +24,7 @@ router.include_router(statistics_router)
 router.include_router(system_router)
 router.include_router(audit_router)
 router.include_router(risk_router)
+router.include_router(watchlist_router)
 
 # Health check
 @router.get("/health")

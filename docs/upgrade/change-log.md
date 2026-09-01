@@ -1,5 +1,64 @@
 # Upgrade Change Log
 
+## 2026-09-02 - Production Dump Analysis
+
+## 2026-09-02 - Candle Intelligence
+
+### Timeframe Alignment
+
+- `chart-intelligence` now accepts the selected timeframe and analyzes the same candles shown by the chart.
+- The Token Detail page requests matching candle metrics for `1m`, `5m`, `15m`, and `1h`.
+
+### Multi-timeframe Fix
+
+- The worker stores provider candles at one-minute resolution.
+- API requests for `5m`, `15m`, and `1h` now aggregate those real one-minute OHLCV rows using first open, maximum high, minimum low, last close, and summed volume.
+- Unsupported timeframes return a clear HTTP 400 instead of an empty chart.
+- No synthetic prices are created; a timeframe is shown only when enough source candles exist.
+
+### Blank Chart Fix
+
+- GeckoTerminal OHLCV requests are now throttled after a rate-limit response and are not requested for every pair every minute.
+- Existing candle history is reused for five minutes before another OHLCV request.
+- Empty chart state now explains that OHLCV is unavailable/rate-limited instead of rendering a blank area.
+
+### Added
+
+- Timestamped OHLCV candle storage with idempotent inserts.
+- GeckoTerminal OHLCV retrieval for watched pools.
+- EMA 9/21, RSI 14, ATR 14, volume ratio, candle pattern, trend, and meme behavior classification.
+- Conservative chart entry gate for `BREAKDOWN`, `EUPHORIA`, and `DISTRIBUTION`.
+- `GET /api/market/pairs/{pair_id}/chart-intelligence` for explainable candle analysis.
+
+### Database
+
+- Migration `008_candles` adds the `candles` table with a unique pair/timeframe/timestamp constraint.
+
+### Risk Impact
+
+- Fewer entries during late pump, distribution, and breakdown conditions.
+- Insufficient candle history produces `WAIT`, not a guessed chart signal.
+
+### Testing
+
+- Added candle normalization and chart-indicator regression coverage.
+
+### Added
+
+- Read-only analysis of `db_dump/dump-memex-202609020010.sql` in `production-dump-analysis-2026-09-02.md`.
+
+### Findings
+
+- Closed PnL was `-34.66 USD`, with 1 win and 9 losses.
+- `ml_sniper_v1` contributed `-31.94 USD`; `momentum_v1` contributed `-2.64 USD`.
+- One position generated 46 partial exits, indicating an exit-stage loop that must be capped.
+- 14.4% of market snapshots had missing liquidity.
+- Prediction confidence remained high even when probability was below 0.5.
+
+### Priority
+
+- Fix repeated partial exits, harden per-position loss limits, block unknown liquidity entries, and reconcile the BUY-to-position execution funnel before expanding live usage.
+
 ## 2026-08-30 - Automatic Database Setup
 
 ### Added
@@ -23,6 +82,18 @@ docker compose ps
 The `db-migrate` service must show `Exited (0)` before backend and worker are considered ready.
 
 ## 2026-08-30 - Docker Desktop Auto-Start
+
+## 2026-09-01 - Watchlist History API Fix
+
+### Fixed
+
+- Fixed `/api/watchlist/history` returning HTTP 500 because a Python `str` type was passed to SQLAlchemy `cast`.
+- The endpoint now uses `sqlalchemy.cast(Pair.id, String)` for the audit-log pair join.
+- Browser CORS errors caused by the backend 500 are resolved; preflight and authenticated history requests now return normally.
+
+### Testing
+
+- Authenticated smoke request returned paginated history successfully (`items=25`, `total=38`).
 
 ## 2026-08-30 - VPS Same-Origin API
 

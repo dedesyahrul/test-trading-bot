@@ -7,6 +7,7 @@ from app.core.security import verify_token
 from app.schemas import PairResponse, EnrichedPairResponse, MarketSnapshotResponse, SignalResponse
 from app.services import PairService, MarketDataService
 from app.services.audit import AuditService
+from app.services.chart_intelligence import ChartIntelligence
 from app.models import Pair, MarketSnapshot, Signal, Token, RiskAssessment
 import logging
 
@@ -216,6 +217,61 @@ async def get_pair_signals(
     )
     signals = result.scalars().all()
     return signals
+
+
+@router.get("/pairs/{pair_id}/chart-intelligence")
+async def get_chart_intelligence(
+    pair_id: str,
+    timeframe: str = "minute",
+    payload: dict = Depends(verify_token),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return the latest deterministic candle analysis for a pair."""
+    if timeframe not in {"minute", "5m", "15m", "hour", "1h"}:
+        raise HTTPException(status_code=400, detail="Unsupported timeframe. Use minute, 5m, 15m, or hour.")
+    candles = await MarketDataService.get_candles(session, pair_id, timeframe, limit=100)
+    assessment = ChartIntelligence.assess(candles)
+    return {
+        "pair_id": pair_id,
+        "timeframe": timeframe,
+        "candle_count": len(candles),
+        "trend": assessment.trend,
+        "behavior": assessment.behavior,
+        "rsi": assessment.rsi,
+        "atr": assessment.atr,
+        "ema_fast": assessment.ema_fast,
+        "ema_slow": assessment.ema_slow,
+        "volume_ratio": assessment.volume_ratio,
+        "candle_pattern": assessment.candle_pattern,
+        "entry_allowed": assessment.entry_allowed,
+        "reasons": assessment.reasons,
+        "updated_at": (candles[-1].get("timestamp") if isinstance(candles[-1], dict) else candles[-1].timestamp).isoformat() if candles else None,
+    }
+
+
+@router.get("/pairs/{pair_id}/candles")
+async def get_pair_candles(
+    pair_id: str,
+    timeframe: str = "minute",
+    limit: int = 100,
+    payload: dict = Depends(verify_token),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return timestamped OHLCV candles for a token chart."""
+    if timeframe not in {"minute", "5m", "15m", "hour", "1h"}:
+        raise HTTPException(status_code=400, detail="Unsupported timeframe. Use minute, 5m, 15m, or hour.")
+    candles = await MarketDataService.get_candles(session, pair_id, timeframe, min(limit, 500))
+    def serialize(candle):
+        value = candle.get if isinstance(candle, dict) else lambda key, default=None: getattr(candle, key, default)
+        return {"timestamp": value("timestamp").isoformat(), "open": float(value("open")), "high": float(value("high")), "low": float(value("low")), "close": float(value("close")), "volume": float(value("volume", 0) or 0)}
+    return {
+        "pair_id": pair_id,
+        "timeframe": timeframe,
+        "items": [
+            serialize(candle)
+            for candle in candles
+        ],
+    }
 
 
 @router.post("/pairs/{pair_id}/watch")

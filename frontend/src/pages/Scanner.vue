@@ -47,7 +47,7 @@
         </thead>
         <tbody>
           <tr v-for="token in tokens" :key="token.id">
-            <td>{{ token.symbol }}</td>
+            <td><router-link :to="`/token/${token.id}`" class="token-link">{{ token.symbol }}</router-link></td>
             <td>${{ formatPrice(token.price) }}</td>
             <td :class="{ positive: token.change24h > 0, negative: token.change24h < 0 }">
               {{ token.change24h > 0 ? '+' : '' }}{{ (token.change24h * 100).toFixed(2) }}%
@@ -314,5 +314,6 @@ onUnmounted(() => {
 }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding-top: 20px; color: var(--muted); font: .72rem 'DM Mono', monospace; }
 .updated-at { color: var(--muted); font: .68rem 'DM Mono', monospace; }
+.token-link { color: var(--text); font-weight: 800; text-decoration: none; }.token-link:hover { color: var(--accent); }
 @media (max-width: 700px) { .pagination { gap: 8px; font-size: .62rem; } }
 </style>
