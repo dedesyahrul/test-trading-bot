@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.core.database import get_db_session
 from app.core.security import verify_token
+from app.core.metrics import metrics_response
+from app.core.metrics_service import refresh_business_metrics
 from app.models import Trade, Position, Signal
+from app.services.validation.paper import generate_paper_validation_report
 from datetime import datetime, timedelta
 import logging
 
@@ -138,3 +141,24 @@ async def get_daily_statistics(
     except Exception as e:
         logger.error(f"Error calculating daily statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/paper-validation")
+async def get_paper_validation(
+    payload: dict = Depends(verify_token),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Get 7-day paper trading validation report."""
+    try:
+        return await generate_paper_validation_report(session)
+    except Exception as e:
+        logger.error(f"Error generating paper validation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/metrics", include_in_schema=False)
+async def prometheus_metrics(session: AsyncSession = Depends(get_db_session)):
+    """Prometheus metrics scrape endpoint."""
+    await refresh_business_metrics(session)
+    body, content_type = metrics_response()
+    return Response(content=body, media_type=content_type)

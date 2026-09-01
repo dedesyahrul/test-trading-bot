@@ -1,4 +1,375 @@
-# Phase 4: Dashboard & Production Readiness — IN PROGRESS
+## [2026-08-30] — Port Configuration Update
+
+### Objective
+
+Mengganti port default yang bentrok dengan service lain di host development ke port non-default yang tersedia.
+
+### Port Mapping (Host → Container)
+
+| Service | Host Port | Container Port |
+|---------|----------:|---------------:|
+| Frontend | 13456 | 3000 |
+| Backend API | 17845 | 8000 |
+| PostgreSQL | 15487 | 5432 |
+| Redis | 16721 | 6379 |
+
+### Files Updated
+
+- `docker-compose.yml`, `docker-compose.prod.yml`
+- `.env.example`, `.env.production`
+- `backend/app/core/config.py`, `backend/app/main.py`
+- `frontend/src/services/api.ts`, `frontend/src/stores/websocket.ts`
+- `frontend/src/pages/Dashboard.vue`, `frontend/vite.config.ts`
+- `docs/docker-guide.md`, `docs/deployment.md`, `docs/README.md`, `docs/architecture.md`
+
+### Validation
+
+- Port availability check: 13456, 17845, 15487, 16721 — semua FREE di host
+- Container internal ports tidak diubah (komunikasi antar-service tetap via hostname Docker)
+
+### Status
+
+DONE
+
+---
+
+## [2026-08-30] — Phase 4: Jupiter, ML Pipeline, Monitoring & Frontend Polish (Part 4)
+
+### Objective
+
+Implement Jupiter API for LIVE trading, LightGBM ML pipeline, Prometheus monitoring, paper validation reporting, and frontend toast notifications.
+
+### Implementation
+
+#### Jupiter API & LIVE Trading
+- `app/adapters/jupiter.py` — Jupiter v6 quote + swap API client
+- `app/adapters/blockchain.py` — SolanaJupiterAdapter with RPC health, sign, broadcast
+- `app/services/wallet/service.py` — in-memory wallet from `WALLET_PRIVATE_KEY`
+- `ExecutionEngine` — LIVE buy/sell via Jupiter with `MAX_LIVE_TRADE_USD` cap
+
+#### ML Pipeline
+- `app/services/prediction/engine.py` — LightGBM inference → `predictions` table
+- `scripts/train_model.py` — offline training (`--synthetic` or from DB)
+- `MLAssistedStrategy` — ML probability threshold integration
+- Worker pipeline: feature → risk → predict → signal → execute
+
+#### Monitoring
+- `app/core/metrics.py` + `metrics_service.py` — Prometheus gauges/counters
+- `GET /metrics` and `GET /api/statistics/metrics`
+
+#### Paper Validation & System Status
+- `GET /api/statistics/paper-validation` — 7-day readiness report
+- `GET /api/system/status` — Jupiter, ML model, wallet health
+
+#### Frontend
+- Toast notifications (`ToastContainer.vue`, `stores/toast.ts`)
+- Dashboard: validation card, ML/Jupiter status, WS toast alerts
+
+### Validation
+- ✅ compileall + 8 tests passed
+- ✅ `python scripts/train_model.py --synthetic` → model artifact created
+- ✅ Prometheus `/metrics` endpoint
+
+### Status
+
+✅ **PARTIALLY COMPLETE** — Phase 4 Part 4 Done
+
+### Remaining
+- Grafana stack deployment
+- Real LIVE test with funded wallet
+- CSRF + load testing
+
+---
+
+## [2026-08-30] — Phase 4: System Audit & Critical Fixes (Part 3)
+
+### Objective
+
+Audit implementasi terhadap dokumentasi, perbaiki gap kritis antara `task_done.md` dan kode aktual, tutup trading loop, dan lengkapi production foundation.
+
+### Issues Found & Fixed
+
+#### Trading Pipeline (Critical)
+- **Signal → Execution**: Pipeline intelligence sekarang memanggil `execute_buy` langsung saat signal BUY terdeteksi
+- **TP/SL Auto-Close**: `monitor_positions_worker` memanggil `ExecutionEngine.execute_sell()` saat TP/SL tercapai
+- **Bot State Control**: Workers menghormati state bot (RUNNING/PAUSED/STOPPED/EMERGENCY_STOP), transisi STARTING→RUNNING dan STOPPING→STOPPED
+- **Strategy dari DB**: `strategy_runner.load_from_db()` memuat parameter & `is_active` dari tabel `strategies`
+- **Risk Config Enforcement**: `ExecutionEngine._validate_trade()` mengecek max positions, daily loss, min liquidity, position size
+
+#### Portfolio API & Frontend
+- `GET /portfolio/positions` — list open/closed positions dengan token symbols
+- `POST /portfolio/positions/{id}/close` — manual close position
+- `GET /portfolio/wallets/default` — auto-create paper wallet
+- `portfolioService` ditambahkan di `frontend/src/services/api.ts`
+- **Positions.vue** — fully wired ke API + WebSocket `POSITION_UPDATED`
+- **Scanner.vue** — enriched market data + WebSocket `NEW_TOKEN_DISCOVERED` / `MARKET_PRICE_UPDATED`
+- **Dashboard.vue** — auto-refresh stats dari WebSocket events
+
+#### Market Data
+- `GET /market/pairs` mengembalikan `EnrichedPairResponse` (symbols, risk, signal, volume, price change)
+- `discover_tokens_worker` sekarang menyimpan `pair_address` untuk DEX Screener API
+
+#### Feature Engineering
+- Implementasi `volume_spike`, `volume_growth_1h`, `volume_acceleration`, `liquidity_change`, `liquidity_ratio`
+
+#### Backtesting
+- `BacktestEngine` menggunakan strategy replay (feature → risk → strategy) bukan buy-and-hold sederhana
+
+#### Production Readiness
+- Sentry integration (`sentry-sdk`) di `main.py` dengan `SENTRY_DSN` env var
+- `AUTO_CREATE_TABLES=false` default — gunakan Alembic migrations
+- CI/CD: `.github/workflows/ci.yml` (backend tests + frontend build)
+- `frontend.prod.Dockerfile` — multi-stage build dengan nginx
+- `docker-compose.prod.yml` — production frontend, healthcheck curl fix, no dev volumes
+- `backend.Dockerfile` — install curl untuk healthcheck
+- Unit tests: `backend/tests/test_core.py` (8 tests)
+
+### Files Created/Modified
+
+#### New Files
+- `.github/workflows/ci.yml`
+- `infrastructure/docker/frontend.prod.Dockerfile`
+- `infrastructure/docker/nginx.conf`
+- `backend/tests/test_core.py`
+
+#### Modified Files
+- `backend/app/workers/main.py` — trading loop, bot state, pair_address
+- `backend/app/services/trading/engine.py` — risk config validation
+- `backend/app/services/strategy/engine.py` — load from DB
+- `backend/app/services/portfolio/service.py` — list positions, TP/SL close
+- `backend/app/services/features/engine.py` — complete volume/liquidity features
+- `backend/app/services/backtest/engine.py` — strategy replay
+- `backend/app/api/portfolio.py` — new endpoints
+- `backend/app/api/market.py` — enriched pairs
+- `backend/app/schemas/__init__.py` — EnrichedPairResponse
+- `backend/app/main.py` — Sentry, gated create_all
+- `backend/app/core/config.py` — SENTRY_DSN, AUTO_CREATE_TABLES
+- `frontend/src/services/api.ts` — portfolioService
+- `frontend/src/pages/Positions.vue`, `Scanner.vue`, `Dashboard.vue`
+- `docker-compose.prod.yml`, `.env.example`, `requirements.txt`
+
+### Validation
+
+- ✅ Python syntax check passed (`compileall`)
+- ✅ 8 unit tests passed (`pytest tests/`)
+- ✅ Trading pipeline: signal → execute → monitor → TP/SL close
+- ✅ Settings DB → runtime strategy parameters
+- ✅ Frontend Positions/Scanner/Dashboard functional
+
+### Status
+
+✅ **PARTIALLY COMPLETE** — Phase 4 Part 3 Done (Core Gaps Fixed)
+
+### Remaining Phase 4 Tasks
+
+1. **Live Trading Launch** (Not Started)
+   - Jupiter API real integration
+   - Wallet signing + secret manager
+   - Small capital live test
+
+2. **ML Pipeline** (Not Started)
+   - LightGBM offline training script
+   - Model serving integration
+
+3. **Production Hardening** (Partially Done)
+   - Load testing
+   - Prometheus/Grafana monitoring (per `docs/observability.md`)
+   - Full security audit (CSRF, key management)
+   - 7-day paper trading validation run
+
+4. **Frontend Polish**
+   - Notification/toast system
+   - Real-time chart updates via WebSocket on Dashboard
+
+### Notes
+
+**What Now Works End-to-End:**
+- Watch pair → collect market data → features → risk → signals → paper BUY
+- Position monitoring → TP/SL auto-close → paper SELL
+- Settings persist to DB and affect runtime strategy + risk limits
+- Scanner/Positions/Dashboard show real data with WebSocket updates
+- Backtest uses actual strategy engine logic
+
+**Known Limitations (updated in Part 4):**
+- LIVE trading requires `WALLET_PRIVATE_KEY` + `TRADING_MODE=LIVE` — code ready, needs funded wallet test
+- Grafana deployment not yet in docker-compose
+- CSRF protection not implemented
+
+---
+
+## [2026-08-30] — Phase 4: Dashboard & Production Readiness (Part 2)
+
+### Objective
+
+Complete settings persistence, Redis Pub/Sub real-time event streaming, Settings page UI, Chart.js integration, security hardening, and production deployment foundation.
+
+### Implementation (Part 2)
+
+#### Database — Strategy & Risk Configuration
+- **Strategy Model** (`app/models/__init__.py`)
+  - `strategies` table with strategy_key, name, strategy_type, parameters (JSON), is_active
+  - Seeded default strategies: momentum_v1, ml_sniper_v1
+- **BotState Enhancement**
+  - Added `risk_config` JSON column for persistent risk management settings
+- **Migration 002** (`alembic/versions/002_strategies_and_risk_config.py`)
+  - Creates strategies table
+  - Adds risk_config to bot_state
+  - Seeds default strategy and risk configurations
+
+#### Settings Service
+- **SettingsService** (`app/services/settings/service.py`)
+  - `get_or_create_bot_state()` — Ensure bot state exists with defaults
+  - `seed_default_strategies()` — Initialize default strategies
+  - `get_all_strategies()` / `update_strategy()` — CRUD for strategies
+  - `get_risk_config()` / `update_risk_config()` — Risk settings persistence
+
+#### Settings API — Database Persistence
+- Updated `app/api/settings.py` to persist all settings to database
+- `GET/PUT /settings/trading` — Full trading config with strategies and risk
+- `GET/PUT /settings/strategies/{id}` — Individual strategy updates
+- `GET/PUT /settings/risk` — Risk configuration CRUD
+
+#### Redis Pub/Sub Event Bus
+- **EventPublisher** (`app/core/events.py`)
+  - Publishes events to `channel:events` Redis channel
+  - Standard format: `{topic, payload}`
+- **EventSubscriber**
+  - Background task in FastAPI lifespan
+  - Forwards Redis events to WebSocket clients
+- **Worker Integration**
+  - `MARKET_PRICE_UPDATED` — On market data collection
+  - `SIGNAL_GENERATED` — On signal generation
+  - `ORDER_STATUS_CHANGED` — On trade execution
+  - `POSITION_UPDATED` — On position monitoring
+  - `NEW_TOKEN_DISCOVERED` — On token discovery
+
+#### WebSocket Enhancements
+- Channel-based subscription filtering
+- Event routing from Redis to subscribed clients
+- Topic-based message format per `docs/realtime.md`
+
+#### Security Hardening
+- **SecurityMiddleware** — Security headers (XSS, CSP, HSTS, frame options)
+- **RateLimiter** — Login rate limiting (10 req/min per IP)
+- **InputValidator** — Username/email validation on registration
+- **AuditLogger** — Auth attempt logging with IP tracking
+
+#### Frontend — Settings Page
+- **Settings.vue** — Full trading configuration UI
+  - Trading mode selector (PAPER/LIVE)
+  - Risk management parameters
+  - Per-strategy enable/disable and parameter editing
+  - Save/reset functionality
+
+#### Frontend — Dashboard Enhancements
+- Live statistics from `/statistics/summary` API
+- Daily volume chart via Chart.js (`PriceChart.vue`)
+- WebSocket connection status indicator
+- Real-time event subscriptions
+
+#### Frontend — API Services
+- `settingsService` — Trading, strategy, risk endpoints
+- `statisticsService` — Summary and daily statistics
+- Auth token interceptor fix (access_token)
+
+#### Worker Fix
+- Removed duplicate `WorkerSettings` class that was overriding full worker config
+- All 7 workers now properly registered in cron jobs
+
+#### Production Deployment
+- `docker-compose.prod.yml` — Production-ready compose with health checks, restart policies
+- `security_hardening.py` — Security middleware module
+- Added `asyncpg` to requirements for async PostgreSQL
+
+### Files Created/Modified
+
+#### New Files (6)
+- `backend/alembic/versions/002_strategies_and_risk_config.py`
+- `backend/app/core/events.py`
+- `backend/app/core/security_hardening.py`
+- `backend/app/services/settings/service.py`
+- `backend/app/services/settings/__init__.py`
+- `frontend/src/components/PriceChart.vue`
+- `docker-compose.prod.yml`
+
+#### Modified Files (10)
+- `backend/app/models/__init__.py` — Strategy model, risk_config on BotState
+- `backend/app/api/settings.py` — DB persistence
+- `backend/app/api/auth.py` — Rate limiting, input validation, audit logging
+- `backend/app/main.py` — Security middleware, Redis subscriber lifespan
+- `backend/app/websocket/manager.py` — Channel subscriptions, event routing
+- `backend/app/workers/main.py` — Event publishing, WorkerSettings fix
+- `backend/app/core/config.py` — ENVIRONMENT setting
+- `backend/requirements.txt` — asyncpg dependency
+- `frontend/src/pages/Settings.vue` — Full settings UI
+- `frontend/src/pages/Dashboard.vue` — Stats, chart, WebSocket
+- `frontend/src/services/api.ts` — Settings/statistics services
+- `frontend/src/stores/websocket.ts` — Subscribe message format fix
+
+### Validation
+
+#### Database
+- ✅ Strategy model with all required fields
+- ✅ Migration 002 with seed data
+- ✅ risk_config JSON on bot_state
+- ✅ Python syntax validation passed
+
+#### Redis Pub/Sub
+- ✅ EventPublisher/Subscriber implemented
+- ✅ Worker event publishing at 5 key points
+- ✅ WebSocket event routing with channel filtering
+
+#### Settings API
+- ✅ Full CRUD for strategies and risk config
+- ✅ Default strategy seeding
+- ✅ Trading mode persistence
+
+#### Security
+- ✅ Security headers middleware
+- ✅ Login rate limiting
+- ✅ Input validation on registration
+- ✅ Audit logging for auth attempts
+
+#### Frontend
+- ✅ Settings page with all configuration options
+- ✅ PriceChart component with Chart.js
+- ✅ Dashboard with live statistics
+- ✅ WebSocket integration with topic subscriptions
+
+### Status
+
+✅ **PARTIALLY COMPLETE** — Phase 4 Part 2 Done
+
+### Remaining Phase 4 Tasks
+
+1. **Production Deployment** (Partially Started)
+   - Docker image optimization
+   - Load testing
+   - Error tracking (Sentry integration)
+   - CI/CD pipeline setup
+   - Monitoring configuration
+
+2. **Live Trading Launch** (Not Started)
+   - Jupiter API integration
+   - Wallet signing implementation
+   - Small capital live test
+
+### Notes
+
+**What Works:**
+- Settings fully persist to database
+- Redis Pub/Sub → WebSocket real-time pipeline
+- Security hardening on auth endpoints
+- Settings page and dashboard with charts
+- Worker event publishing for all key trading events
+
+**Next Steps (Phase 4 Part 3):**
+1. Run full integration test with Docker
+2. Sentry error tracking integration
+3. CI/CD pipeline (GitHub Actions)
+4. Live trading preparation (Jupiter API, wallet signing)
+
+---
 
 ## [2026-08-29] — Phase 4: Dashboard & Production Readiness (Part 1)
 
@@ -813,4 +1184,4 @@ npm install
 npm run dev
 ```
 
-Access dashboard at http://localhost:3000 and API at http://localhost:8000/docs
+Access dashboard at http://localhost:13456 and API at http://localhost:17845/docs

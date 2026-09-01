@@ -5,26 +5,27 @@ services:
     image: postgres:16-alpine
     container_name: memex-postgres
     environment:
-      POSTGRES_USER: memex
-      POSTGRES_PASSWORD: memex
-      POSTGRES_DB: memex
+      POSTGRES_USER: ${DB_USER:-memex}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-memex}
+      POSTGRES_DB: ${DB_NAME:-memex}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-15487}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U memex"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-memex}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - memex-network
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: memex-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-16721}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -34,6 +35,26 @@ services:
       retries: 5
     networks:
       - memex-network
+    restart: unless-stopped
+
+  db-migrate:
+    build:
+      context: ./backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    container_name: memex-db-migrate
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-memex}:${DB_PASSWORD:-memex}@postgres:5432/${DB_NAME:-memex}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      PAPER_INITIAL_BALANCE: ${PAPER_INITIAL_BALANCE:-100}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: sh -c "alembic upgrade head && python -m scripts.seed_defaults"
+    networks:
+      - memex-network
 
   backend:
     build:
@@ -41,23 +62,27 @@ services:
       dockerfile: ../infrastructure/docker/backend.Dockerfile
     container_name: memex-backend
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-17845}:8000"
     environment:
-      DATABASE_URL: postgresql://memex:memex@postgres:5432/memex
+      DATABASE_URL: postgresql://${DB_USER:-memex}:${DB_PASSWORD:-memex}@postgres:5432/${DB_NAME:-memex}
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
       DEBUG: ${DEBUG:-false}
       TRADING_MODE: ${TRADING_MODE:-PAPER}
+      PAPER_INITIAL_BALANCE: ${PAPER_INITIAL_BALANCE:-100}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - memex-network
+    restart: unless-stopped
 
   worker:
     build:
@@ -65,21 +90,25 @@ services:
       dockerfile: ../infrastructure/docker/worker.Dockerfile
     container_name: memex-worker
     environment:
-      DATABASE_URL: postgresql://memex:memex@postgres:5432/memex
+      DATABASE_URL: postgresql://${DB_USER:-memex}:${DB_PASSWORD:-memex}@postgres:5432/${DB_NAME:-memex}
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
       DEBUG: ${DEBUG:-false}
       TRADING_MODE: ${TRADING_MODE:-PAPER}
+      PAPER_INITIAL_BALANCE: ${PAPER_INITIAL_BALANCE:-100}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     volumes:
       - ./backend:/app
     command: python -m arq app.workers.main.WorkerSettings
     networks:
       - memex-network
+    restart: unless-stopped
 
   frontend:
     build:
@@ -87,14 +116,16 @@ services:
       dockerfile: ../infrastructure/docker/frontend.Dockerfile
     container_name: memex-frontend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-13456}:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      VITE_API_URL: http://localhost:8000/api
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:17845/api}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:17845/ws}
     networks:
       - memex-network
+    restart: unless-stopped
 
 volumes:
   pgdata:

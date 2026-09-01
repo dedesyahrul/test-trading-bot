@@ -67,6 +67,26 @@ class PairResponse(BaseModel):
         from_attributes = True
 
 
+class EnrichedPairResponse(BaseModel):
+    id: UUID
+    chain_id: str
+    base_token: str
+    quote_token: str
+    symbol: str
+    dex_name: str
+    price_usd: Optional[float] = None
+    price_change_24h: Optional[float] = None
+    volume_24h_usd: Optional[float] = None
+    liquidity_usd: Optional[float] = None
+    risk_level: Optional[str] = None
+    risk_score: Optional[float] = None
+    signal_type: Optional[str] = None
+    is_watched: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    market_data_at: Optional[str] = None
+
+
 class MarketSnapshotResponse(BaseModel):
     id: UUID
     pair_id: UUID

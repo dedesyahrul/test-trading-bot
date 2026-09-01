@@ -13,12 +13,15 @@ export const useWebSocketStore = defineStore('websocket', () => {
   const subscriptions = ref<Set<string>>(new Set())
   
   let ws: WebSocket | null = null
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  let manuallyDisconnected = false
   let reconnectAttempts = 0
   const maxReconnectAttempts = 5
   const reconnectDelay = 3000
 
-  const connect = (url: string = 'ws://localhost:8000/ws') => {
+  const connect = (url: string = 'ws://localhost:17845/ws') => {
     if (ws && connected.value) return
+    manuallyDisconnected = false
 
     try {
       ws = new WebSocket(url)
@@ -27,6 +30,11 @@ export const useWebSocketStore = defineStore('websocket', () => {
         console.log('WebSocket connected')
         connected.value = true
         reconnectAttempts = 0
+        // Re-subscribe after every reconnect because the server creates a new
+        // subscription set for each WebSocket connection.
+        subscriptions.value.forEach((channel) => {
+          ws?.send(JSON.stringify({ type: 'subscribe', channel }))
+        })
       }
 
       ws.onmessage = (event) => {
@@ -46,7 +54,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
       ws.onclose = () => {
         console.log('WebSocket disconnected')
         connected.value = false
-        attemptReconnect(url)
+        if (!manuallyDisconnected) attemptReconnect(url)
       }
     } catch (error) {
       console.error('Failed to create WebSocket:', error)
@@ -58,7 +66,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
     if (reconnectAttempts < maxReconnectAttempts) {
       reconnectAttempts++
       console.log(`Reconnecting... Attempt ${reconnectAttempts}/${maxReconnectAttempts}`)
-      setTimeout(() => connect(url), reconnectDelay)
+      reconnectTimer = setTimeout(() => connect(url), reconnectDelay)
     } else {
       console.error('Max reconnect attempts reached')
     }
@@ -74,21 +82,20 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   const subscribe = (channel: string) => {
     subscriptions.value.add(channel)
-    send({
-      type: 'subscribe',
-      data: { channel }
-    })
+    if (ws && connected.value) send({ type: 'subscribe', channel })
   }
 
   const unsubscribe = (channel: string) => {
     subscriptions.value.delete(channel)
     send({
       type: 'unsubscribe',
-      data: { channel }
+      channel,
     })
   }
 
   const disconnect = () => {
+    manuallyDisconnected = true
+    if (reconnectTimer) clearTimeout(reconnectTimer)
     if (ws) {
       ws.close()
       ws = null

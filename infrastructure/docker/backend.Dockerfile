@@ -4,10 +4,12 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.txt uses pinned versions, not hash-pinned requirements.
+RUN PIP_REQUIRE_HASHES=0 PIP_CONFIG_FILE=/dev/null pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 

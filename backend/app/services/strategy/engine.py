@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models import Signal, Feature, RiskAssessment, MarketSnapshot
+from app.models import Signal, Feature, RiskAssessment, MarketSnapshot, Prediction
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ class BaseStrategy(ABC):
         market_snapshot: MarketSnapshot,
         feature: Optional[Feature],
         risk_assessment: Optional[RiskAssessment],
+        prediction: Optional["Prediction"] = None,
     ) -> TradingSignal:
         """Evaluate market conditions and return trading signal."""
         pass
@@ -67,6 +68,7 @@ class MomentumStrategy(BaseStrategy):
         market_snapshot: MarketSnapshot,
         feature: Optional[Feature],
         risk_assessment: Optional[RiskAssessment],
+        prediction: Optional[Prediction] = None,
     ) -> TradingSignal:
         """Evaluate momentum signals."""
         
@@ -147,7 +149,7 @@ class MomentumStrategy(BaseStrategy):
 
 
 class MLAssistedStrategy(BaseStrategy):
-    """ML-assisted sniper strategy - combines momentum with predictions."""
+    """ML-assisted sniper strategy — uses LightGBM prediction when model is available."""
 
     async def evaluate(
         self,
@@ -155,34 +157,54 @@ class MLAssistedStrategy(BaseStrategy):
         market_snapshot: MarketSnapshot,
         feature: Optional[Feature],
         risk_assessment: Optional[RiskAssessment],
+        prediction: Optional[Prediction] = None,
     ) -> TradingSignal:
-        """Evaluate ML-assisted signals."""
-        
+        from app.core.config import settings
+        from app.services.prediction.engine import PredictionEngine
+
         reasons_pro = []
         reasons_contra = []
         signal_type = "HOLD"
         confidence = 0.0
 
-        # For now, use same logic as momentum (ML predictions will be integrated in Phase 2.5)
         min_volume_24h = self.parameters.get("min_volume_24h", 50000)
         if market_snapshot.volume_24h_usd and float(market_snapshot.volume_24h_usd) < min_volume_24h:
-            reasons_contra.append(f"Volume too low")
+            reasons_contra.append("Volume too low")
             signal_type = "SKIP"
         else:
-            reasons_pro.append(f"Adequate volume")
-            confidence += 0.2
+            reasons_pro.append("Adequate volume")
+            confidence += 0.15
 
-        # Check risk score
         max_risk_score = self.parameters.get("max_risk_score", 40)
         if risk_assessment and float(risk_assessment.risk_score) > max_risk_score:
             reasons_contra.append(f"Risk too high: {float(risk_assessment.risk_score):.0f}")
             signal_type = "SKIP"
         elif risk_assessment:
-            confidence += 0.3
+            confidence += 0.2
 
-        # Final decision
+        ml_threshold = self.parameters.get(
+            "ml_probability_threshold", settings.ML_PREDICTION_THRESHOLD
+        )
+
+        if prediction and PredictionEngine.is_available():
+            prob = float(prediction.probability)
+            if prob >= ml_threshold:
+                reasons_pro.append(f"ML probability {prob:.1%} >= {ml_threshold:.0%}")
+                confidence += prob * 0.5
+            else:
+                reasons_contra.append(f"ML probability {prob:.1%} < {ml_threshold:.0%}")
+                if signal_type != "SKIP":
+                    signal_type = "SKIP"
+        elif PredictionEngine.is_available():
+            reasons_contra.append("No ML prediction available")
+        else:
+            reasons_pro.append("ML model not trained — using risk/volume only")
+            confidence += 0.15
+
         if signal_type != "SKIP" and confidence >= 0.5:
             signal_type = "BUY"
+        elif signal_type == "HOLD" and confidence < 0.3:
+            signal_type = "SKIP"
 
         target_tp = None
         target_sl = None
@@ -196,7 +218,7 @@ class MLAssistedStrategy(BaseStrategy):
             pair_id=pair_id,
             strategy_id=self.strategy_id,
             signal_type=signal_type,
-            confidence=confidence,
+            confidence=min(confidence, 1.0),
             reasons_pro=reasons_pro,
             reasons_contra=reasons_contra,
             target_tp=target_tp,
@@ -215,48 +237,84 @@ class StrategyRunner:
         self.strategies[strategy.strategy_id] = strategy
         logger.info(f"Strategy registered: {strategy.strategy_id}")
 
+    def clear_strategies(self):
+        """Remove all registered strategies."""
+        self.strategies.clear()
+
+    async def load_from_db(self, session: AsyncSession) -> None:
+        """Load active strategies from database settings."""
+        from app.services.settings.service import SettingsService
+
+        self.clear_strategies()
+        db_strategies = await SettingsService.get_all_strategies(session)
+        for db_strategy in db_strategies:
+            if not db_strategy.is_active:
+                continue
+            params = db_strategy.parameters or {}
+            if db_strategy.strategy_type == "momentum":
+                self.register_strategy(
+                    MomentumStrategy(strategy_id=db_strategy.strategy_key, parameters=params)
+                )
+            elif db_strategy.strategy_type == "ml_assisted":
+                self.register_strategy(
+                    MLAssistedStrategy(strategy_id=db_strategy.strategy_key, parameters=params)
+                )
+            else:
+                logger.warning("Unknown strategy type: %s", db_strategy.strategy_type)
+
+        if not self.strategies:
+            logger.warning("No active strategies in DB, using defaults")
+            self._register_defaults()
+
+    def _register_defaults(self):
+        """Register hardcoded defaults as fallback."""
+        self.register_strategy(
+            MomentumStrategy(
+                strategy_id="momentum_v1",
+                parameters={
+                    "min_volume_24h": 50000,
+                    "min_price_change_5m": 0.05,
+                    "min_volume_spike": 2.0,
+                    "min_buy_sell_ratio": 1.2,
+                    "max_risk_score": 50,
+                    "take_profit_pct": 0.20,
+                    "stop_loss_pct": 0.10,
+                },
+            )
+        )
+        self.register_strategy(
+            MLAssistedStrategy(
+                strategy_id="ml_sniper_v1",
+                parameters={
+                    "min_volume_24h": 50000,
+                    "max_risk_score": 40,
+                    "take_profit_pct": 0.15,
+                    "stop_loss_pct": 0.10,
+                },
+            )
+        )
+
     async def evaluate_all(
         self,
         pair_id: str,
         market_snapshot: MarketSnapshot,
         feature: Optional[Feature],
         risk_assessment: Optional[RiskAssessment],
+        prediction: Optional[Prediction] = None,
     ) -> list[TradingSignal]:
         """Run all registered strategies and return signals."""
         signals = []
         for strategy_id, strategy in self.strategies.items():
             try:
-                signal = await strategy.evaluate(pair_id, market_snapshot, feature, risk_assessment)
+                signal = await strategy.evaluate(
+                    pair_id, market_snapshot, feature, risk_assessment, prediction
+                )
                 signals.append(signal)
             except Exception as e:
                 logger.error(f"Error evaluating strategy {strategy_id}: {e}")
         return signals
 
 
-# Initialize default strategy runner
+# Initialize default strategy runner (loaded from DB at worker runtime)
 strategy_runner = StrategyRunner()
-strategy_runner.register_strategy(
-    MomentumStrategy(
-        strategy_id="momentum_v1",
-        parameters={
-            "min_volume_24h": 50000,
-            "min_price_change_5m": 0.05,
-            "min_volume_spike": 2.0,
-            "min_buy_sell_ratio": 1.2,
-            "max_risk_score": 50,
-            "take_profit_pct": 0.20,
-            "stop_loss_pct": 0.10,
-        },
-    )
-)
-strategy_runner.register_strategy(
-    MLAssistedStrategy(
-        strategy_id="ml_sniper_v1",
-        parameters={
-            "min_volume_24h": 50000,
-            "max_risk_score": 40,
-            "take_profit_pct": 0.15,
-            "stop_loss_pct": 0.10,
-        },
-    )
-)
+strategy_runner._register_defaults()

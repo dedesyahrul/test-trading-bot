@@ -5,6 +5,11 @@ from app.core.security import verify_token
 from app.schemas import BotStateResponse
 from app.models import BotState
 import logging
+from datetime import timedelta
+from arq import create_pool
+from arq.connections import RedisSettings
+from app.core.config import settings
+from app.services.audit import AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +46,32 @@ async def start_bot(
         bot_state.state = "STARTING"
     
     await session.commit()
+    await AuditService.record(session, "BOT_START", "BOT", user_id=payload.get("sub"),
+                              details={"trading_mode": bot_state.trading_mode})
+    await session.commit()
+
+    # Do not make users wait for the next five-minute cron tick after starting.
+    # The worker still owns the actual pipeline and execution logic.
+    redis_pool = None
+    try:
+        redis_pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+        await redis_pool.enqueue_job("collect_market_data_worker")
+        await redis_pool.enqueue_job(
+            "process_watched_pairs_pipeline",
+            _defer_by=timedelta(seconds=30),
+        )
+    except Exception as exc:
+        logger.exception("Could not enqueue initial trading jobs")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Trading worker is unavailable. Make sure the worker and Redis services are running.",
+        ) from exc
+    finally:
+        if redis_pool:
+            await redis_pool.close()
+
     logger.info("Bot start requested")
-    return {"message": "Bot is starting"}
+    return {"message": "Bot is starting", "state": "STARTING"}
 
 
 @router.post("/stop")
@@ -59,8 +88,10 @@ async def stop_bot(
         bot_state.state = "STOPPING"
     
     await session.commit()
+    await AuditService.record(session, "BOT_STOP", "BOT", user_id=payload.get("sub"))
+    await session.commit()
     logger.info("Bot stop requested")
-    return {"message": "Bot is stopping"}
+    return {"message": "Bot is stopping", "state": "STOPPING"}
 
 
 @router.post("/pause")
@@ -76,6 +107,8 @@ async def pause_bot(
     else:
         bot_state.state = "PAUSED"
     
+    await session.commit()
+    await AuditService.record(session, "BOT_PAUSE", "BOT", user_id=payload.get("sub"))
     await session.commit()
     logger.info("Bot pause requested")
     return {"message": "Bot is paused"}
@@ -95,6 +128,8 @@ async def emergency_stop_bot(
         bot_state.state = "EMERGENCY_STOP"
     
     await session.commit()
+    await AuditService.record(session, "EMERGENCY_STOP", "BOT", user_id=payload.get("sub"))
+    await session.commit()
     logger.critical("EMERGENCY STOP ACTIVATED")
     return {"message": "Emergency stop activated"}
 
@@ -113,6 +148,8 @@ async def reset_bot(
         bot_state.state = "STOPPED"
         bot_state.error_message = None
     
+    await session.commit()
+    await AuditService.record(session, "BOT_RESET", "BOT", user_id=payload.get("sub"))
     await session.commit()
     logger.info("Bot reset")
     return {"message": "Bot reset to STOPPED state"}

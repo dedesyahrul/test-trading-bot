@@ -38,7 +38,7 @@ class RiskEngine:
         # Initialize risk scores for each category
         liquidity_risk = RiskEngine._calculate_liquidity_risk(market_snapshot)
         manipulation_risk = RiskEngine._calculate_manipulation_risk(market_snapshot)
-        volatility_risk = RiskEngine._calculate_volatility_risk(feature or {})
+        volatility_risk = RiskEngine._calculate_volatility_risk(feature)
         execution_risk = RiskEngine._calculate_execution_risk(market_snapshot)
 
         # Check hard constraints first
@@ -135,12 +135,12 @@ class RiskEngine:
             return 50  # Abnormal (more sells than buys)
 
     @staticmethod
-    def _calculate_volatility_risk(feature: dict) -> float:
+    def _calculate_volatility_risk(feature) -> float:
         """Calculate volatility risk."""
-        if not feature or not isinstance(feature, dict):
+        if not feature:
             return 50
 
-        volatility = feature.get("volatility_1h")
+        volatility = feature.get("volatility_1h") if isinstance(feature, dict) else getattr(feature, "volatility_1h", None)
         if not volatility:
             return 30
 

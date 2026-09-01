@@ -53,15 +53,47 @@ class FeatureEngineering:
         # Volume features
         volume_1h_usd = float(current_snapshot.volume_1h_usd or 0) if current_snapshot.volume_1h_usd else None
         volume_24h_usd = float(current_snapshot.volume_24h_usd or 0) if current_snapshot.volume_24h_usd else None
+        liquidity_usd = float(current_snapshot.liquidity_usd or 0) if current_snapshot.liquidity_usd else None
+
+        volume_growth_1h = None
+        volume_acceleration = None
+        volume_spike = None
+        if snapshots_1h and len(snapshots_1h) >= 2:
+            first_vol = float(snapshots_1h[0].volume_1h_usd or snapshots_1h[0].volume_24h_usd or 0)
+            last_vol = float(snapshots_1h[-1].volume_1h_usd or snapshots_1h[-1].volume_24h_usd or 0)
+            if first_vol > 0:
+                volume_growth_1h = (last_vol - first_vol) / first_vol
+            if len(snapshots_1h) >= 3:
+                mid = len(snapshots_1h) // 2
+                early_avg = sum(
+                    float(s.volume_1h_usd or s.volume_24h_usd or 0) for s in snapshots_1h[:mid]
+                ) / mid
+                late_avg = sum(
+                    float(s.volume_1h_usd or s.volume_24h_usd or 0) for s in snapshots_1h[mid:]
+                ) / (len(snapshots_1h) - mid)
+                if early_avg > 0:
+                    volume_acceleration = (late_avg - early_avg) / early_avg
+            avg_vol = sum(
+                float(s.volume_1h_usd or s.volume_24h_usd or 0) for s in snapshots_1h[:-1]
+            ) / max(len(snapshots_1h) - 1, 1)
+            current_vol = float(current_snapshot.volume_1h_usd or current_snapshot.volume_24h_usd or 0)
+            if avg_vol > 0:
+                volume_spike = current_vol / avg_vol
+
+        liquidity_change = None
+        liquidity_ratio = None
+        if snapshots_1h and liquidity_usd is not None:
+            first_liq = float(snapshots_1h[0].liquidity_usd or 0)
+            if first_liq > 0:
+                liquidity_change = (liquidity_usd - first_liq) / first_liq
+            if volume_24h_usd and volume_24h_usd > 0:
+                liquidity_ratio = liquidity_usd / volume_24h_usd
         
         # Transaction features
         buy_count_24h = current_snapshot.buy_count_24h or 0
         sell_count_24h = current_snapshot.sell_count_24h or 0
         buy_sell_ratio_1h = FeatureEngineering._compute_buy_sell_ratio(buy_count_24h, sell_count_24h)
         buy_pressure = FeatureEngineering._compute_buy_pressure(buy_count_24h, sell_count_24h)
-        
-        # Liquidity features
-        liquidity_usd = float(current_snapshot.liquidity_usd or 0) if current_snapshot.liquidity_usd else None
         
         # Create feature record
         feature = Feature(
@@ -72,13 +104,13 @@ class FeatureEngineering:
             return_1h=Decimal(str(return_1h)) if return_1h is not None else None,
             volatility_1h=Decimal(str(volatility_1h)) if volatility_1h is not None else None,
             momentum_1h=Decimal(str(momentum_1h)) if momentum_1h is not None else None,
-            volume_growth_1h=None,  # TODO: compute from historical
-            volume_acceleration=None,  # TODO: compute from historical
-            volume_spike=None,  # TODO: compute
+            volume_growth_1h=Decimal(str(volume_growth_1h)) if volume_growth_1h is not None else None,
+            volume_acceleration=Decimal(str(volume_acceleration)) if volume_acceleration is not None else None,
+            volume_spike=Decimal(str(volume_spike)) if volume_spike is not None else None,
             buy_sell_ratio_1h=Decimal(str(buy_sell_ratio_1h)) if buy_sell_ratio_1h is not None else None,
             buy_pressure=Decimal(str(buy_pressure)) if buy_pressure is not None else None,
-            liquidity_change=None,  # TODO: compute from historical
-            liquidity_ratio=None,  # TODO: compute
+            liquidity_change=Decimal(str(liquidity_change)) if liquidity_change is not None else None,
+            liquidity_ratio=Decimal(str(liquidity_ratio)) if liquidity_ratio is not None else None,
             raw_data={
                 "snapshots_count_1h": len(snapshots_1h),
                 "buy_count_24h": buy_count_24h,

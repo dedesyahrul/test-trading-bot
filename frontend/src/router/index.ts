@@ -38,6 +38,12 @@ const routes = [
     component: () => import('../pages/Settings.vue'),
     meta: { requiresAuth: true }
   },
+  {
+    path: '/audit',
+    name: 'Audit',
+    component: () => import('../pages/Audit.vue'),
+    meta: { requiresAuth: true }
+  },
 ]
 
 const router = createRouter({

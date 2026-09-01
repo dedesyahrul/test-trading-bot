@@ -496,6 +496,19 @@ graph TB
 | `postgres` | postgres:16 | Database | 5432 |
 | `redis` | redis:7-alpine | Cache, queue, pub/sub | 6379 |
 
+### 8.2.1 Host Port Mapping
+
+Port internal container tidak diubah. Host port menggunakan angka non-default untuk menghindari konflik:
+
+| Service | Container Port | Host Port |
+|---------|---------------:|----------:|
+| Frontend | 3000 | 13456 |
+| Backend | 8000 | 17845 |
+| PostgreSQL | 5432 | 15487 |
+| Redis | 6379 | 16721 |
+
+> Konfigurasi via `FRONTEND_PORT`, `BACKEND_PORT`, `DB_PORT`, `REDIS_PORT` di `.env`. Lihat [docker-guide.md](docker-guide.md#5-port-registry).
+
 ### 8.3 Volume Mounts
 
 | Container | Volume | Purpose |

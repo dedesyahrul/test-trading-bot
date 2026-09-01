@@ -156,6 +156,7 @@ memex/
 | [security.md](security.md) | Authentication, authorization, input validation |
 | [observability.md](observability.md) | Logging, metrics, resilience |
 | [deployment.md](deployment.md) | Docker architecture, deployment guide |
+| [docker-guide.md](docker-guide.md) | Panduan lengkap build, run, backup & maintenance Docker |
 | [frontend.md](frontend.md) | Vue 3 dashboard design |
 | [realtime.md](realtime.md) | WebSocket/SSE architecture |
 | [api.md](api.md) | REST API specification |
@@ -165,8 +166,35 @@ memex/
 
 ## Quick Start (Development)
 
-> [!NOTE]
-> Instruksi ini akan diperbarui setelah implementasi Phase 1.
+### Opsi A — Docker (Rekomendasi)
+
+```bash
+# Clone repository
+git clone <repo-url> memex
+cd memex
+
+# Siapkan environment
+cp .env.example .env
+
+# Generate package-lock.json (pertama kali)
+cd frontend && npm install && cd ..
+
+# Build & jalankan semua service
+docker compose build
+docker compose up -d
+
+# Migration database
+docker compose exec backend alembic upgrade head
+```
+
+Akses:
+- Frontend: http://localhost:13456
+- API Docs: http://localhost:17845/docs
+- Health: http://localhost:17845/api/health
+
+> Panduan lengkap Docker (production, backup, troubleshooting): **[docker-guide.md](docker-guide.md)**
+
+### Opsi B — Lokal Tanpa Docker
 
 ```bash
 # Clone repository
@@ -174,7 +202,7 @@ git clone <repo-url> memex
 cd memex
 
 # Start infrastructure
-docker-compose up -d postgres redis
+docker compose up -d postgres redis
 
 # Backend
 cd backend

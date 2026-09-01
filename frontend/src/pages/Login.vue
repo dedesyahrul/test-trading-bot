@@ -11,6 +11,7 @@
           <label class="form-label">Password</label>
           <input v-model="password" type="password" class="form-input" required />
         </div>
+        <div v-if="error" class="error-message">{{ error }}</div>
         <button type="submit" class="btn btn-primary">Login</button>
         <router-link to="/register" class="btn btn-secondary">Register</router-link>
       </form>
@@ -37,8 +38,8 @@ const handleLogin = async () => {
     const userResponse = await authService.getCurrentUser()
     authStore.setUser(userResponse.data)
     router.push('/')
-  } catch (err) {
-    error.value = 'Invalid credentials'
+  } catch (err: any) {
+    error.value = err.response?.data?.detail || 'Invalid credentials'
   }
 }
 </script>

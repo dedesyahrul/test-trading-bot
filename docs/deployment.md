@@ -61,12 +61,33 @@ MemeX dirancang sebagai aplikasi *cloud-native* 12-factor. Deployment standar di
 
 Penggunaan Docker Compose memisahkan worker berdasarkan fungsinya. Ini bertujuan untuk mengisolasi kegagalan (misalnya worker ML yang crash kehabisan memori tidak boleh mengganggu worker eksekusi).
 
+**File Compose yang Tersedia:**
+
+| File | Environment | Deskripsi |
+|------|-------------|-----------|
+| `docker-compose.yml` | Development | Hot-reload, volume mount source code |
+| `docker-compose.prod.yml` | Production | Restart policy, healthcheck, env dari file |
+
+> Untuk panduan lengkap build, run, backup, dan maintenance Docker, lihat **[docker-guide.md](docker-guide.md)**.
+
+### Port Registry
+
+| Service | Container Port | Host Port | Protocol |
+|---------|---------------:|----------:|----------|
+| Frontend | 3000 | **13456** | TCP |
+| Backend API | 8000 | **17845** | TCP |
+| PostgreSQL | 5432 | **15487** | TCP |
+| Redis | 6379 | **16721** | TCP |
+| WebSocket | 8000 | **17845** | WS |
+
+> Host port dikonfigurasi via environment variables (`BACKEND_PORT`, `DB_PORT`, dll.) di `.env` / `.env.production`. Port dipilih non-default untuk menghindari konflik dengan service lain di host. Lihat [docker-guide.md — Port Registry](docker-guide.md#5-port-registry).
+
 **Rekomendasi Spesifikasi Hardware (Production):**
 - CPU: 4 Cores
 - RAM: 8 GB (PostgreSQL dan ML inference membutuhkan cukup memori)
 - Storage: 100 GB NVMe SSD (Penting untuk read/write database yang cepat)
 
-*(File `docker-compose.yml` terperinci akan dibuat pada fase implementasi kode).*
+*(File `docker-compose.yml` dan `docker-compose.prod.yml` tersedia di root project. Lihat [docker-guide.md](docker-guide.md) untuk panduan lengkap.)*
 
 ---
 

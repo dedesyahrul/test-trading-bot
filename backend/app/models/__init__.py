@@ -126,6 +126,7 @@ class RiskAssessment(Base):
     contract_risk = Column(Numeric(5, 2))
     developer_risk = Column(Numeric(5, 2))
     manipulation_risk = Column(Numeric(5, 2))
+    volatility_risk = Column(Numeric(5, 2))
     rug_pull_risk = Column(Numeric(5, 2))
     slippage_risk = Column(Numeric(5, 2))
     execution_risk = Column(Numeric(5, 2))
@@ -205,6 +206,18 @@ class Position(Base):
     entry_amount = Column(Numeric(20, 8), nullable=False)
     current_price = Column(Numeric(20, 8))
     current_amount = Column(Numeric(20, 8))
+    initial_stop_loss = Column(Numeric(20, 8))
+    highest_price = Column(Numeric(20, 8))
+    profit_lock_price = Column(Numeric(20, 8))
+    exit_pressure = Column(Numeric(5, 2), default=0)
+    partial_exit_count = Column(Integer, default=0)
+    entry_decision_score = Column(Numeric(5, 2))
+    entry_thesis = Column(JSON, default={})
+    decision_id = Column(UUID(as_uuid=True), ForeignKey("trade_decisions.id"), index=True)
+    exit_reason = Column(String(40))
+    mae_usd = Column(Numeric(20, 2))
+    mfe_usd = Column(Numeric(20, 2))
+    thesis_invalidated = Column(Boolean, default=False)
     stop_loss = Column(Numeric(20, 8))
     take_profit = Column(Numeric(20, 8))
     status = Column(String(20), default="OPEN")  # OPEN, CLOSED, ERROR
@@ -219,6 +232,7 @@ class Trade(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     position_id = Column(UUID(as_uuid=True), ForeignKey("positions.id"), nullable=False)
+    decision_id = Column(UUID(as_uuid=True), ForeignKey("trade_decisions.id"), index=True)
     trade_type = Column(String(10), nullable=False)  # BUY, SELL
     price = Column(Numeric(20, 8), nullable=False)
     amount = Column(Numeric(20, 8), nullable=False)
@@ -241,11 +255,56 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
+class Strategy(Base):
+    __tablename__ = "strategies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    strategy_key = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    strategy_type = Column(String(50), nullable=False)
+    parameters = Column(JSON, nullable=False, default={})
+    is_active = Column(Boolean, default=True)
+    description = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class BotState(Base):
     __tablename__ = "bot_state"
 
     id = Column(Integer, primary_key=True)
     state = Column(String(20), default="STOPPED")  # STOPPED, STARTING, RUNNING, PAUSED, STOPPING, ERROR, EMERGENCY_STOP
     trading_mode = Column(String(10), default="PAPER")  # PAPER, LIVE
+    risk_config = Column(JSON, default={
+        "max_position_size_usd": 1000,
+        "max_daily_loss_usd": 500,
+        "max_positions": 5,
+        "min_liquidity_usd": 5000,
+        "max_risk_score": 50,
+    })
     last_update = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     error_message = Column(Text)
+    circuit_state = Column(String(20), default="RUNNING")
+    consecutive_failures = Column(Integer, default=0)
+    daily_loss_usd = Column(Numeric(20, 2), default=0)
+    last_failure_at = Column(DateTime)
+
+
+class TradeDecision(Base):
+    """Auditable record of each strategy/risk decision."""
+    __tablename__ = "trade_decisions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pair_id = Column(UUID(as_uuid=True), ForeignKey("pairs.id"), nullable=False, index=True)
+    strategy_id = Column(String(50), nullable=False)
+    decision = Column(String(20), nullable=False)
+    signal_type = Column(String(20))
+    confidence = Column(Numeric(5, 4))
+    risk_score = Column(Numeric(5, 2))
+    risk_level = Column(String(20))
+    position_size_usd = Column(Numeric(20, 8))
+    decision_score = Column(Numeric(5, 2))
+    data_quality = Column(String(20))
+    features = Column(JSON, default={})
+    reasons = Column(JSON, default=[])
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)

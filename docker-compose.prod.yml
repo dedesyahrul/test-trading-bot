@@ -1,0 +1,144 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: memex-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-memex}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-memex}
+      POSTGRES_DB: ${DB_NAME:-memex}
+    ports:
+      - "${DB_PORT:-15487}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-memex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memex-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: memex-redis
+    ports:
+      - "${REDIS_PORT:-16721}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memex-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  db-migrate:
+    build:
+      context: ./backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    container_name: memex-db-migrate
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-memex}:${DB_PASSWORD:-memex}@postgres:5432/${DB_NAME:-memex}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      PAPER_INITIAL_BALANCE: ${PAPER_INITIAL_BALANCE:-100}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && python -m scripts.seed_defaults"
+    networks:
+      - memex-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    container_name: memex-backend
+    ports:
+      - "${BACKEND_PORT:-17845}:8000"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-memex}:${DB_PASSWORD:-memex}@postgres:5432/${DB_NAME:-memex}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-false}
+      TRADING_MODE: ${TRADING_MODE:-PAPER}
+      PAPER_INITIAL_BALANCE: ${PAPER_INITIAL_BALANCE:-100}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      AUTO_CREATE_TABLES: ${AUTO_CREATE_TABLES:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - memex-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: ../infrastructure/docker/worker.Dockerfile
+    container_name: memex-worker
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-memex}:${DB_PASSWORD:-memex}@postgres:5432/${DB_NAME:-memex}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-false}
+      TRADING_MODE: ${TRADING_MODE:-PAPER}
+      PAPER_INITIAL_BALANCE: ${PAPER_INITIAL_BALANCE:-100}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - memex-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../infrastructure/docker/frontend.prod.Dockerfile
+    container_name: memex-frontend
+    ports:
+      - "${FRONTEND_PORT:-13456}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - memex-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  pgdata:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  memex-network:
+    driver: bridge

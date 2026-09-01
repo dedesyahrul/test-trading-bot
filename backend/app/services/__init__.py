@@ -43,6 +43,61 @@ class UserService:
 
 
 class ChainService:
+    KNOWN_CHAINS = {
+        "solana": {
+            "name": "Solana",
+            "native_token": "SOL",
+            "rpc_url": "https://api.mainnet-beta.solana.com",
+            "explorer_url": "https://solscan.io",
+        },
+        "base": {
+            "name": "Base",
+            "native_token": "ETH",
+            "rpc_url": "https://mainnet.base.org",
+            "explorer_url": "https://basescan.org",
+        },
+        "ethereum": {
+            "name": "Ethereum",
+            "native_token": "ETH",
+            "rpc_url": "https://eth.llamarpc.com",
+            "explorer_url": "https://etherscan.io",
+        },
+        "bsc": {
+            "name": "BNB Chain",
+            "native_token": "BNB",
+            "rpc_url": "https://bsc-dataseed.binance.org",
+            "explorer_url": "https://bscscan.com",
+        },
+    }
+
+    @staticmethod
+    async def create_or_get_chain(session: AsyncSession, chain_id: str) -> Chain:
+        """Create chain or return existing."""
+        chain = await session.get(Chain, chain_id)
+        if chain:
+            return chain
+
+        meta = ChainService.KNOWN_CHAINS.get(
+            chain_id,
+            {
+                "name": chain_id.title(),
+                "native_token": "NATIVE",
+                "rpc_url": "https://localhost",
+                "explorer_url": None,
+            },
+        )
+        chain = Chain(
+            id=chain_id,
+            name=meta["name"],
+            native_token=meta["native_token"],
+            rpc_url=meta["rpc_url"],
+            explorer_url=meta.get("explorer_url"),
+        )
+        session.add(chain)
+        await session.commit()
+        await session.refresh(chain)
+        return chain
+
     @staticmethod
     async def create_chain(session: AsyncSession, chain_id: str, name: str, native_token: str, rpc_url: str) -> Chain:
         """Create new chain."""
@@ -111,8 +166,10 @@ class PairService:
         base_token_id,
         quote_token_id,
         dex_name: str,
+        pair_address: Optional[str] = None,
         price_usd: Optional[Decimal] = None,
         liquidity_usd: Optional[Decimal] = None,
+        is_watched: bool = False,
     ) -> Pair:
         """Create pair or get existing."""
         result = await session.execute(
@@ -124,17 +181,29 @@ class PairService:
             )
         )
         pair = result.scalars().first()
-        
+
         if pair:
+            if pair_address and not pair.pair_address:
+                pair.pair_address = pair_address
+            if price_usd is not None:
+                pair.price_usd = price_usd
+            if liquidity_usd is not None:
+                pair.liquidity_usd = liquidity_usd
+            if is_watched:
+                pair.is_watched = True
+            await session.commit()
+            await session.refresh(pair)
             return pair
-        
+
         pair = Pair(
             chain_id=chain_id,
             base_token_id=base_token_id,
             quote_token_id=quote_token_id,
             dex_name=dex_name,
+            pair_address=pair_address,
             price_usd=price_usd,
             liquidity_usd=liquidity_usd,
+            is_watched=is_watched,
         )
         session.add(pair)
         await session.commit()
