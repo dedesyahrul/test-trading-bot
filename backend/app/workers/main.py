@@ -12,7 +12,7 @@ from app.services.features.engine import FeatureEngineering
 from app.services.risk.engine import RiskEngine
 from app.services.strategy.engine import strategy_runner
 from sqlalchemy import select
-from app.models import Pair, Signal, BotState, TradeDecision, Position
+from app.models import Pair, Token, Signal, BotState, TradeDecision, Position
 from app.services.data_quality import DataQualityService, DataQualityStatus
 from app.services.risk.decision import RiskDecisionService
 from app.services.risk.portfolio import PortfolioRiskService
@@ -20,12 +20,15 @@ from app.adapters.geckoterminal import GeckoTerminalClient
 from app.services.decision_score import DecisionScoreService
 from app.services.trading.adaptive_exit import AdaptiveExitService
 from app.services.chart_intelligence import ChartIntelligence
+from app.services.security.gate import SecurityGateService
+from app.workers.security_integration import assess_risk_with_security_gate
 import asyncio
 
 logger = logging.getLogger(__name__)
 
 dex_screener_client = DEXScreenerClient()
 gecko_terminal_client = GeckoTerminalClient()
+security_gate_service = SecurityGateService()
 market_collection_lock = asyncio.Lock()
 
 TRADING_ACTIVE_STATES = {"RUNNING", "STARTING"}
@@ -83,6 +86,32 @@ async def _execute_buy_for_signal(session, signal, pair_id, position_size_usd=No
         return
     if not await _can_execute_trades(session):
         logger.info("Bot not in trading state, skipping BUY for pair %s", pair_id)
+        return
+
+    # Final veto for the internal execution path as well as the ARQ worker.
+    latest_snapshot = await MarketDataService.get_latest_snapshot(session, pair_id)
+    pair = await session.get(Pair, pair_id)
+    token = await session.get(Token, pair.base_token_id) if pair else None
+    if not latest_snapshot or not pair or not token:
+        logger.warning("Security data unavailable; refusing BUY for pair %s", pair_id)
+        return
+    liquidity_usd = latest_snapshot.liquidity_usd if latest_snapshot.liquidity_usd is not None else pair.liquidity_usd
+    gate_result = await security_gate_service.evaluate_token(
+        chain=pair.chain_id,
+        token_address=token.address,
+        pair_address=pair.pair_address or "",
+        market_snapshot={
+            "liquidity_usd": float(liquidity_usd) if liquidity_usd is not None else None,
+            "buy_count_24h": latest_snapshot.buy_count_24h or 0,
+            "sell_count_24h": latest_snapshot.sell_count_24h or 0,
+            "volume_24h_usd": float(latest_snapshot.volume_24h_usd or 0),
+            "price_usd": float(latest_snapshot.price_usd or 0),
+            "trading_mode": settings.TRADING_MODE,
+        },
+        position_size_usd=float(position_size_usd) if position_size_usd is not None else None,
+    )
+    if gate_result.is_blocked or gate_result.is_deferred:
+        logger.warning("Final security veto %s BUY for pair %s: %s", gate_result.status, pair_id, gate_result.reason)
         return
 
     wallet = await _get_default_wallet(session)
@@ -152,6 +181,37 @@ async def _run_intelligence_pipeline(session, pair_id) -> None:
     if not latest_snapshot:
         return
 
+    # Security is a veto layer and must run before feature/prediction work.
+    pair = await session.get(Pair, pair_id)
+    token = await session.get(Token, pair.base_token_id) if pair else None
+    if not pair or not token:
+        logger.error("Security gate cannot resolve pair/token %s", pair_id)
+        return
+    liquidity_usd = latest_snapshot.liquidity_usd if latest_snapshot.liquidity_usd is not None else pair.liquidity_usd
+    gate_result = await security_gate_service.evaluate_token(
+        chain=pair.chain_id,
+        token_address=token.address,
+        pair_address=pair.pair_address or "",
+        market_snapshot={
+            "liquidity_usd": float(liquidity_usd) if liquidity_usd is not None else None,
+            "buy_count_24h": latest_snapshot.buy_count_24h or 0,
+            "sell_count_24h": latest_snapshot.sell_count_24h or 0,
+            "volume_24h_usd": float(latest_snapshot.volume_24h_usd or 0),
+            "price_usd": float(latest_snapshot.price_usd or 0),
+            "trading_mode": settings.TRADING_MODE,
+        },
+    )
+    if gate_result.is_blocked or gate_result.is_deferred:
+        logger.warning("Security gate %s pair %s: %s", gate_result.status, pair_id, gate_result.reason)
+        session.add(TradeDecision(
+            pair_id=pair_id,
+            strategy_id="security_gate",
+            decision="REJECT" if gate_result.is_blocked else "DEFERRED",
+            reasons=[gate_result.reason],
+        ))
+        await session.commit()
+        return
+
     quality, quality_reasons = DataQualityService.assess(latest_snapshot)
     if quality in {DataQualityStatus.INVALID, DataQualityStatus.STALE}:
         session.add(TradeDecision(
@@ -168,7 +228,9 @@ async def _run_intelligence_pipeline(session, pair_id) -> None:
         logger.warning("Chart gate blocked entry for %s: %s", pair_id, chart.behavior)
     logger.warning("Features ready for pair %s; assessing risk", pair_id)
     risk_assessment = await RiskEngine.assess_risk(
-        session, pair_id, latest_snapshot, feature=computed_feature
+        session, pair_id, latest_snapshot,
+        security_gate_score=gate_result.security_gate_score,
+        feature=computed_feature,
     )
     logger.warning("Risk ready for pair %s: score=%s", pair_id, risk_assessment.risk_score)
 
@@ -415,18 +477,25 @@ async def assess_risk_worker(ctx, pair_id):
     
     async with async_session_maker() as session:
         try:
-            # Get latest market snapshot and features
+            # Get latest market snapshot and run the security veto before risk scoring.
             latest_snapshot = await MarketDataService.get_latest_snapshot(session, pair_id)
             if not latest_snapshot:
                 logger.warning(f"No market data for pair {pair_id}")
                 return
             
-            # Assess risk
-            risk_assessment = await RiskEngine.assess_risk(
-                session,
-                pair_id,
-                latest_snapshot,
+            blocked, result = await assess_risk_with_security_gate(
+                session, pair_id, latest_snapshot
             )
+            if blocked:
+                status = "BLOCKED" if result.get("blocked") else "DEFERRED"
+                logger.warning(
+                    "Security gate %s pair %s: %s",
+                    status,
+                    pair_id,
+                    result.get("block_reason") or result.get("error") or "Security verification unavailable",
+                )
+                return
+            risk_assessment = result.get("risk_assessment")
             logger.info(f"Risk assessment completed for pair {pair_id}: {risk_assessment.risk_level}")
             
             # If not blacklisted, enqueue signal generation
@@ -513,6 +582,42 @@ async def execute_buy_signal_worker(ctx, pair_id, confidence, target_tp, target_
     
     async with async_session_maker() as session:
         try:
+            # Final security veto immediately before constructing/sending a swap.
+            latest_snapshot = await MarketDataService.get_latest_snapshot(session, pair_id)
+            if not latest_snapshot:
+                logger.warning("No latest snapshot; refusing BUY for pair %s", pair_id)
+                return
+            pair = await session.get(Pair, pair_id)
+            token = await session.get(Token, pair.base_token_id) if pair else None
+            if not pair or not token:
+                logger.warning("Cannot resolve pair/token; refusing BUY for pair %s", pair_id)
+                return
+            liquidity_usd = latest_snapshot.liquidity_usd if latest_snapshot.liquidity_usd is not None else pair.liquidity_usd
+            gate_result = await security_gate_service.evaluate_token(
+                chain=pair.chain_id,
+                token_address=token.address,
+                pair_address=pair.pair_address or "",
+                market_snapshot={
+                    "liquidity_usd": float(liquidity_usd) if liquidity_usd is not None else None,
+                    "buy_count_24h": latest_snapshot.buy_count_24h or 0,
+                    "sell_count_24h": latest_snapshot.sell_count_24h or 0,
+                    "volume_24h_usd": float(latest_snapshot.volume_24h_usd or 0),
+                    "price_usd": float(latest_snapshot.price_usd or 0),
+                    "trading_mode": settings.TRADING_MODE,
+                },
+                # This ARQ entrypoint receives no explicit size; the execution
+                # engine applies the configured default after the final veto.
+                position_size_usd=None,
+            )
+            if gate_result.is_blocked or gate_result.is_deferred:
+                logger.warning(
+                    "Final security veto %s BUY for pair %s: %s",
+                    gate_result.status,
+                    pair_id,
+                    gate_result.reason,
+                )
+                return
+
             from app.services.trading.engine import ExecutionEngine
             from app.adapters.blockchain import SolanaJupiterAdapter
             
@@ -691,6 +796,21 @@ async def discover_tokens_worker(ctx):
                         price_usd=normalized.get("price_usd"),
                         liquidity_usd=normalized.get("liquidity", {}).get("usd"),
                     )
+
+                    scan_liquidity = normalized.get("liquidity", {}).get("usd")
+                    if scan_liquidity is None or scan_liquidity < settings.SECURITY_SCAN_MIN_LIQUIDITY_USD:
+                        logger.info(
+                            "Skipping discovered pair %s: Dexscreener liquidity %s below scan minimum $%.2f",
+                            pair_address,
+                            scan_liquidity,
+                            settings.SECURITY_SCAN_MIN_LIQUIDITY_USD,
+                        )
+                        # Do not watch low-liquidity discovery results. The
+                        # pair is retained for history, but never enters the
+                        # active trading pipeline.
+                        pair.is_watched = False
+                        await session.commit()
+                        continue
 
                     if normalized.get("price_usd"):
                         await MarketDataService.save_market_snapshot(

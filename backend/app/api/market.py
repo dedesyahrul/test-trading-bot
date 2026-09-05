@@ -53,9 +53,17 @@ async def _enrich_pair(session: AsyncSession, pair: Pair) -> dict:
     )
     latest_signal = signal_result.scalars().first()
 
-    price_usd = float(snapshot.price_usd) if snapshot and snapshot.price_usd else (
-        float(pair.price_usd) if pair.price_usd else None
-    )
+    # Snapshot fields are nullable because a pair can be discovered before
+    # its first successful market-data collection. Keep that state as null
+    # instead of dereferencing an absent snapshot or inventing zero values.
+    snapshot_price = snapshot.price_usd if snapshot is not None else None
+    pair_price = pair.price_usd if pair is not None else None
+    snapshot_liquidity = snapshot.liquidity_usd if snapshot is not None else None
+    pair_liquidity = pair.liquidity_usd if pair is not None else None
+    price_value = snapshot_price if snapshot_price is not None else pair_price
+    liquidity_value = snapshot_liquidity if snapshot_liquidity is not None else pair_liquidity
+    price_change_24h = snapshot.price_change_24h if snapshot is not None else None
+    volume_24h_usd = snapshot.volume_24h_usd if snapshot is not None else None
 
     return {
         "id": pair.id,
@@ -64,10 +72,10 @@ async def _enrich_pair(session: AsyncSession, pair: Pair) -> dict:
         "quote_token": quote_symbol,
         "symbol": f"{base_symbol}/{quote_symbol}",
         "dex_name": pair.dex_name,
-        "price_usd": price_usd,
-        "price_change_24h": float(snapshot.price_change_24h or 0) / 100 if snapshot and snapshot.price_change_24h else 0,
-        "volume_24h_usd": float(snapshot.volume_24h_usd or 0) if snapshot and snapshot.volume_24h_usd else 0,
-        "liquidity_usd": float(snapshot.liquidity_usd or pair.liquidity_usd or 0) if (snapshot and snapshot.liquidity_usd) or pair.liquidity_usd else 0,
+        "price_usd": float(price_value) if price_value is not None else None,
+        "price_change_24h": float(price_change_24h) / 100 if price_change_24h is not None else None,
+        "volume_24h_usd": float(volume_24h_usd) if volume_24h_usd is not None else None,
+        "liquidity_usd": float(liquidity_value) if liquidity_value is not None else None,
         "risk_level": risk.risk_level if risk else "UNKNOWN",
         "risk_score": float(risk.risk_score) if risk else None,
         "signal_type": latest_signal.signal_type if latest_signal else "HOLD",

@@ -136,6 +136,7 @@ class TokenService:
         symbol: str,
         name: Optional[str] = None,
         decimals: int = 18,
+        developer_address: Optional[str] = None,
     ) -> Token:
         """Create token or get existing."""
         result = await session.execute(
@@ -146,6 +147,9 @@ class TokenService:
         token = result.scalars().first()
         
         if token:
+            if developer_address and token.developer_address != developer_address:
+                token.developer_address = developer_address
+                await session.commit()
             return token
         
         token = Token(
@@ -154,6 +158,7 @@ class TokenService:
             symbol=symbol,
             name=name,
             decimals=decimals,
+            developer_address=developer_address,
         )
         session.add(token)
         await session.commit()

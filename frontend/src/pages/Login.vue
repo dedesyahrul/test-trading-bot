@@ -1,22 +1,15 @@
 <template>
-  <div class="container">
-    <div class="card">
-      <div class="card-title">Login</div>
-      <form @submit.prevent="handleLogin">
-        <div class="form-group">
-          <label class="form-label">Username</label>
-          <input v-model="username" type="text" class="form-input" required />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Password</label>
-          <input v-model="password" type="password" class="form-input" required />
-        </div>
-        <div v-if="error" class="error-message">{{ error }}</div>
-        <button type="submit" class="btn btn-primary">Login</button>
-        <router-link to="/register" class="btn btn-secondary">Register</router-link>
-      </form>
-    </div>
-  </div>
+  <AuthShell>
+    <div class="auth-form-head"><div class="form-kicker">Welcome back</div><h1>Sign in to your<br /><span>trading command center.</span></h1><p>Pick up where you left off and keep your edge.</p></div>
+    <form class="auth-form" @submit.prevent="handleLogin">
+      <label class="auth-label">Username <span>Required</span><div class="input-wrap"><span class="field-icon">◎</span><input v-model.trim="username" type="text" autocomplete="username" placeholder="Enter your username" required /></div></label>
+      <label class="auth-label">Password <span>Required</span><div class="input-wrap"><span class="field-icon">⌑</span><input v-model="password" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" placeholder="Enter your password" required /><button type="button" class="visibility" @click="showPassword = !showPassword">{{ showPassword ? 'Hide' : 'Show' }}</button></div></label>
+      <div class="form-options"><label class="check-label"><input v-model="rememberMe" type="checkbox" /><span class="fake-check"></span>Remember me</label><a href="#" @click.prevent="forgotPassword">Forgot password?</a></div>
+      <div v-if="error" class="auth-error">{{ error }}</div><button class="auth-submit" type="submit" :disabled="loading"><span>{{ loading ? 'Authenticating...' : 'Sign in' }}</span><b>→</b></button>
+    </form>
+    <div class="auth-divider"><span>or continue with</span></div><div class="social-grid"><button type="button" @click="socialLogin('Google')"><b class="google">G</b>Google</button><button type="button" @click="socialLogin('Phantom')"><b class="phantom">◈</b>Phantom</button><button type="button" @click="socialLogin('Solflare')"><b class="solflare">S</b>Solflare</button></div>
+    <p class="auth-switch">Don’t have an account? <router-link to="/register">Create one <span>→</span></router-link></p>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
@@ -24,34 +17,13 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { authService } from '../services/api'
-
-const router = useRouter()
-const authStore = useAuthStore()
-const username = ref('')
-const password = ref('')
-const error = ref('')
-
-const handleLogin = async () => {
-  try {
-    const response = await authService.login(username.value, password.value)
-    authStore.setToken(response.data.access_token)
-    const userResponse = await authService.getCurrentUser()
-    authStore.setUser(userResponse.data)
-    router.push('/')
-  } catch (err: any) {
-    error.value = err.response?.data?.detail || 'Invalid credentials'
-  }
-}
+import AuthShell from '../components/AuthShell.vue'
+const router = useRouter(); const authStore = useAuthStore(); const username = ref(''); const password = ref(''); const error = ref(''); const loading = ref(false); const showPassword = ref(false); const rememberMe = ref(true)
+const handleLogin = async () => { error.value = ''; loading.value = true; try { const response = await authService.login(username.value, password.value); authStore.setToken(response.data.access_token); const userResponse = await authService.getCurrentUser(); authStore.setUser(userResponse.data); router.push('/') } catch (err: any) { error.value = err.response?.data?.detail || 'Unable to sign in. Check your credentials.' } finally { loading.value = false } }
+const forgotPassword = () => { error.value = 'Password recovery is not enabled yet. Contact your workspace admin.' }
+const socialLogin = (provider: string) => { error.value = `${provider} sign-in will be available soon.` }
 </script>
 
 <style scoped>
-.btn-secondary {
-  background-color: #6c757d;
-  color: white;
-  margin-left: 1rem;
-}
-
-.btn-secondary:hover {
-  background-color: #5a6268;
-}
+.auth-form-head{margin-bottom:31px}.form-kicker{margin-bottom:13px;color:var(--accent);font:500 .65rem 'DM Mono',monospace;letter-spacing:.13em;text-transform:uppercase}.auth-form-head h1{margin:0;font-size:clamp(1.85rem,3vw,2.45rem);letter-spacing:-.08em;line-height:1.02}.auth-form-head h1 span{color:var(--muted)}.auth-form-head p{margin:13px 0 0;color:var(--muted);font-size:.75rem}.auth-form{display:grid;gap:18px}.auth-label{display:block;color:#c8d0d6;font-size:.68rem;font-weight:800}.auth-label>span{float:right;color:var(--faint);font:500 .55rem 'DM Mono',monospace;font-weight:400}.input-wrap{display:flex;align-items:center;gap:9px;margin-top:8px;padding:0 12px;border:1px solid var(--line-strong);border-radius:9px;background:rgba(19,22,27,.78);transition:.2s}.input-wrap:focus-within{border-color:rgba(0,245,139,.65);box-shadow:0 0 0 3px rgba(0,245,139,.08),0 0 22px rgba(0,245,139,.08)}.field-icon{color:var(--faint);font-size:1.1rem}.input-wrap input{width:100%;height:43px;border:0;outline:0;background:transparent;color:var(--text);font-size:.7rem}.input-wrap input::placeholder{color:#58616c}.visibility{border:0;background:transparent;color:var(--muted);font:500 .57rem 'DM Mono',monospace}.visibility:hover{color:var(--accent)}.form-options{display:flex;align-items:center;justify-content:space-between;margin-top:-4px;color:var(--muted);font-size:.63rem}.form-options a{color:var(--accent);text-decoration:none}.check-label{display:flex;align-items:center;gap:7px;cursor:pointer}.check-label input{position:absolute;opacity:0}.fake-check{display:grid;width:14px;height:14px;place-items:center;border:1px solid var(--line-strong);border-radius:4px;background:var(--surface-raised)}.check-label input:checked+.fake-check{border-color:var(--accent);background:var(--accent)}.check-label input:checked+.fake-check:after{width:6px;height:3px;border-bottom:2px solid #06140c;border-left:2px solid #06140c;transform:rotate(-45deg);content:''}.auth-submit{display:flex;align-items:center;justify-content:space-between;width:100%;height:46px;margin-top:2px;padding:0 15px 0 17px;border:0;border-radius:9px;background:var(--accent);box-shadow:0 0 25px rgba(0,245,139,.17);color:#06130c;font-size:.72rem;font-weight:800;transition:.2s}.auth-submit:hover:not(:disabled){box-shadow:0 0 32px rgba(0,245,139,.35);transform:translateY(-1px)}.auth-submit:disabled{opacity:.6;cursor:wait}.auth-submit b{font-size:1.25rem;font-weight:500}.auth-error{padding:10px 12px;border:1px solid rgba(255,101,119,.25);border-radius:7px;background:rgba(255,101,119,.08);color:var(--danger);font-size:.64rem}.auth-divider{display:flex;align-items:center;gap:12px;margin:27px 0 16px;color:var(--faint);font:500 .57rem 'DM Mono',monospace}.auth-divider:before,.auth-divider:after{height:1px;flex:1;background:var(--line);content:''}.social-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.social-grid button{display:flex;align-items:center;justify-content:center;gap:7px;height:38px;border:1px solid var(--line-strong);border-radius:8px;background:rgba(255,255,255,.025);color:#cbd3da;font-size:.61rem;font-weight:700}.social-grid button:hover{border-color:rgba(0,245,139,.35);background:rgba(0,245,139,.05)}.social-grid b{font-size:.85rem}.google{color:#f3b14c}.phantom{color:#ab70ff}.solflare{color:#ff9d4d}.auth-switch{margin:28px 0 0;color:var(--muted);font-size:.68rem;text-align:center}.auth-switch a{color:var(--accent);font-weight:800;text-decoration:none}.auth-switch a span{margin-left:4px;font-size:1rem}
 </style>

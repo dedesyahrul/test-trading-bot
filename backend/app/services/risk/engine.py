@@ -32,8 +32,17 @@ class RiskEngine:
         pair_id,
         market_snapshot: MarketSnapshot,
         feature: Optional[Feature] = None,
+        security_gate_score: int = 0,  # Security gate score (0-100)
     ) -> RiskAssessment:
-        """Assess token risk and return RiskAssessment."""
+        """Assess token risk and return RiskAssessment with security-first weighting.
+
+        Args:
+            session: Database session
+            pair_id: Pair ID to assess
+            market_snapshot: Market data snapshot
+            security_gate_score: Security gate score (0-100) from SecurityGateService (NEW)
+            feature: Computed features (optional)
+        """
 
         # Initialize risk scores for each category
         liquidity_risk = RiskEngine._calculate_liquidity_risk(market_snapshot)
@@ -44,12 +53,15 @@ class RiskEngine:
         # Check hard constraints first
         is_blacklisted, constraint_reason = RiskEngine._check_hard_constraints(market_snapshot)
 
-        # Weighted average (30% liquidity, 30% manipulation, 20% volatility, 20% execution)
+        # NEW: Weighted formula with SECURITY FIRST (40% security gate)
+        # This ensures security decisions override other factors
         overall_risk_score = (
-            liquidity_risk * 0.30
-            + manipulation_risk * 0.30
-            + volatility_risk * 0.20
-            + execution_risk * 0.20
+            security_gate_score * 0.40 +     # SECURITY FIRST (40%)
+            liquidity_risk * 0.20 +
+            manipulation_risk * 0.15 +
+            volatility_risk * 0.12 +
+            execution_risk * 0.08
+            # metadata_risk * 0.05  # Future enhancement
         )
 
         # Determine risk level

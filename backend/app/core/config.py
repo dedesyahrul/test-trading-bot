@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     # Blockchain / Jupiter
     JUPITER_API_URL: str = os.getenv("JUPITER_API_URL", "https://quote-api.jup.ag/v6")
     SOLANA_RPC_URL: str = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    SOLANA_RPC_URLS: str = os.getenv("SOLANA_RPC_URLS", "")
+    SECURITY_GATE_ENABLED: bool = os.getenv("SECURITY_GATE_ENABLED", "true").lower() == "true"
+    SECURITY_LIQUIDITY_THRESHOLD_USD: float = float(os.getenv("SECURITY_LIQUIDITY_THRESHOLD_USD", "1000"))
+    SECURITY_SCAN_MIN_LIQUIDITY_USD: float = float(os.getenv("SECURITY_SCAN_MIN_LIQUIDITY_USD", "1000"))
+    SECURITY_PAPER_MIN_LIQUIDITY_USD: float = float(os.getenv("SECURITY_PAPER_MIN_LIQUIDITY_USD", "1000"))
+    SECURITY_LIVE_MIN_LIQUIDITY_USD: float = float(os.getenv("SECURITY_LIVE_MIN_LIQUIDITY_USD", "10000"))
+    SECURITY_MAX_POSITION_LIQUIDITY_PCT: float = float(os.getenv("SECURITY_MAX_POSITION_LIQUIDITY_PCT", "0.05"))
+    SECURITY_HONEYPOT_BUY_THRESHOLD: int = int(os.getenv("SECURITY_HONEYPOT_BUY_THRESHOLD", "50"))
+    SECURITY_HOLDER_CONCENTRATION_THRESHOLD: float = float(os.getenv("SECURITY_HOLDER_CONCENTRATION_THRESHOLD", "85"))
     DEFAULT_SLIPPAGE_BPS: int = int(os.getenv("DEFAULT_SLIPPAGE_BPS", "50"))
     WALLET_PRIVATE_KEY: Optional[str] = os.getenv("WALLET_PRIVATE_KEY")
     MAX_LIVE_TRADE_USD: float = float(os.getenv("MAX_LIVE_TRADE_USD", "100"))

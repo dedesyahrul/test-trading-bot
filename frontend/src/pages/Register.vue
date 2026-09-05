@@ -1,56 +1,33 @@
 <template>
-  <div class="container">
-    <div class="card">
-      <div class="card-title">Register</div>
-      <form @submit.prevent="handleRegister">
-        <div class="form-group">
-          <label class="form-label">Username</label>
-          <input v-model="username" type="text" class="form-input" required />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Email</label>
-          <input v-model="email" type="email" class="form-input" required />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Password</label>
-          <input v-model="password" type="password" class="form-input" required />
-        </div>
-        <button type="submit" class="btn btn-primary">Register</button>
-        <router-link to="/login" class="btn btn-secondary">Login</router-link>
-      </form>
-    </div>
-  </div>
+  <AuthShell>
+    <div class="auth-form-head"><div class="form-kicker">Start your edge</div><h1>Create your<br /><span>memeX account.</span></h1><p>Build strategies, scan faster, and automate your next move.</p></div>
+    <form class="auth-form" @submit.prevent="handleRegister">
+      <label class="auth-label">Username <span>Required</span><div class="input-wrap"><span class="field-icon">◎</span><input v-model.trim="username" type="text" autocomplete="username" placeholder="Choose a username" required minlength="3" /></div></label>
+      <label class="auth-label">Email address <span>Required</span><div class="input-wrap"><span class="field-icon">@</span><input v-model.trim="email" type="email" autocomplete="email" placeholder="you@company.com" required /></div></label>
+      <label class="auth-label">Password <span>Required</span><div class="input-wrap"><span class="field-icon">⌑</span><input v-model="password" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" placeholder="Create a secure password" required minlength="8" /><button type="button" class="visibility" @click="showPassword = !showPassword">{{ showPassword ? 'Hide' : 'Show' }}</button></div></label>
+      <div class="strength-row"><div class="strength-bars"><i v-for="n in 4" :key="n" :class="{ filled: passwordStrength >= n, strong: passwordStrength >= 3 }"></i></div><span>{{ strengthLabel }}</span></div>
+      <label class="auth-label">Confirm password <span>Required</span><div class="input-wrap"><span class="field-icon">⌑</span><input v-model="confirmPassword" :type="showPassword ? 'text' : 'password'" autocomplete="new-password" placeholder="Repeat your password" required /></div></label>
+      <label class="referral-label">Referral code <small>Optional</small><input v-model.trim="referral" class="plain-input" placeholder="e.g. MEMEX-ALPHA" /></label>
+      <label class="check-label terms-check"><input v-model="acceptedTerms" type="checkbox" required /><span class="fake-check"></span><span>I agree to the <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a></span></label>
+      <div v-if="error" class="auth-error">{{ error }}</div><button class="auth-submit" type="submit" :disabled="loading"><span>{{ loading ? 'Creating account...' : 'Create account' }}</span><b>→</b></button>
+    </form>
+    <div class="auth-divider"><span>or connect a wallet</span></div><button class="wallet-connect" type="button" @click="connectWallet"><span>◈</span> Connect Phantom or Solflare <b>↗</b></button>
+    <p class="auth-switch">Already have an account? <router-link to="/login">Sign in <span>→</span></router-link></p>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { authService } from '../services/api'
-
-const router = useRouter()
-const username = ref('')
-const email = ref('')
-const password = ref('')
-const error = ref('')
-
-const handleRegister = async () => {
-  try {
-    await authService.register(username.value, email.value, password.value)
-    router.push('/login')
-  } catch (err) {
-    error.value = 'Registration failed'
-  }
-}
+import AuthShell from '../components/AuthShell.vue'
+const router = useRouter(); const username = ref(''); const email = ref(''); const password = ref(''); const confirmPassword = ref(''); const referral = ref(''); const acceptedTerms = ref(false); const error = ref(''); const loading = ref(false); const showPassword = ref(false)
+const passwordStrength = computed(() => { let score = 0; if (password.value.length >= 8) score++; if (/[A-Z]/.test(password.value)) score++; if (/[0-9]/.test(password.value)) score++; if (/[^A-Za-z0-9]/.test(password.value)) score++; return score })
+const strengthLabel = computed(() => ['Enter a password', 'Weak password', 'Fair password', 'Good password', 'Strong password'][passwordStrength.value])
+const handleRegister = async () => { error.value = ''; if (password.value !== confirmPassword.value) { error.value = 'Passwords do not match.'; return } if (passwordStrength.value < 2) { error.value = 'Use at least 8 characters with a number or uppercase letter.'; return } loading.value = true; try { await authService.register(username.value, email.value, password.value); router.push('/login') } catch (err: any) { error.value = err.response?.data?.detail || 'Unable to create account. Please try again.' } finally { loading.value = false } }
+const connectWallet = () => { error.value = 'Wallet connection will be available soon.' }
 </script>
 
 <style scoped>
-.btn-secondary {
-  background-color: #6c757d;
-  color: white;
-  margin-left: 1rem;
-}
-
-.btn-secondary:hover {
-  background-color: #5a6268;
-}
+.auth-form-head{margin-bottom:25px}.form-kicker{margin-bottom:13px;color:var(--accent);font:500 .65rem 'DM Mono',monospace;letter-spacing:.13em;text-transform:uppercase}.auth-form-head h1{margin:0;font-size:clamp(1.85rem,3vw,2.45rem);letter-spacing:-.08em;line-height:1.02}.auth-form-head h1 span{color:var(--muted)}.auth-form-head p{margin:13px 0 0;color:var(--muted);font-size:.75rem}.auth-form{display:grid;gap:14px}.auth-label{display:block;color:#c8d0d6;font-size:.68rem;font-weight:800}.auth-label>span{float:right;color:var(--faint);font:500 .55rem 'DM Mono',monospace;font-weight:400}.input-wrap{display:flex;align-items:center;gap:9px;margin-top:7px;padding:0 12px;border:1px solid var(--line-strong);border-radius:9px;background:rgba(19,22,27,.78);transition:.2s}.input-wrap:focus-within{border-color:rgba(0,245,139,.65);box-shadow:0 0 0 3px rgba(0,245,139,.08)}.field-icon{color:var(--faint);font-size:1.1rem}.input-wrap input{width:100%;height:39px;border:0;outline:0;background:transparent;color:var(--text);font-size:.68rem}.input-wrap input::placeholder,.plain-input::placeholder{color:#58616c}.visibility{border:0;background:transparent;color:var(--muted);font:500 .57rem 'DM Mono',monospace}.strength-row{display:flex;align-items:center;gap:9px;margin-top:-7px}.strength-bars{display:flex;gap:3px;flex:1}.strength-bars i{height:3px;flex:1;border-radius:4px;background:var(--surface-soft)}.strength-bars i.filled{background:var(--warning)}.strength-bars i.filled.strong{background:var(--accent)}.strength-row span{min-width:85px;color:var(--muted);font:500 .57rem 'DM Mono',monospace;text-align:right}.referral-label{display:block;color:var(--muted);font-size:.65rem;font-weight:700}.referral-label small{float:right;color:var(--faint);font:500 .55rem 'DM Mono',monospace;font-weight:400}.plain-input{display:block;width:100%;height:36px;margin-top:7px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.025);color:var(--text);outline:0;font-size:.65rem}.plain-input:focus{border-color:rgba(0,245,139,.5)}.check-label{display:flex;align-items:flex-start;gap:7px;color:var(--muted);font-size:.61rem;cursor:pointer}.check-label input{position:absolute;opacity:0}.fake-check{display:grid;flex:none;width:14px;height:14px;margin-top:1px;place-items:center;border:1px solid var(--line-strong);border-radius:4px;background:var(--surface-raised)}.check-label input:checked+.fake-check{border-color:var(--accent);background:var(--accent)}.check-label input:checked+.fake-check:after{width:6px;height:3px;border-bottom:2px solid #06140c;border-left:2px solid #06140c;transform:rotate(-45deg);content:''}.terms-check a{color:var(--accent);text-decoration:none}.auth-error{padding:10px 12px;border:1px solid rgba(255,101,119,.25);border-radius:7px;background:rgba(255,101,119,.08);color:var(--danger);font-size:.64rem}.auth-submit{display:flex;align-items:center;justify-content:space-between;width:100%;height:44px;padding:0 15px 0 17px;border:0;border-radius:9px;background:var(--accent);box-shadow:0 0 25px rgba(0,245,139,.17);color:#06130c;font-size:.72rem;font-weight:800;transition:.2s}.auth-submit:hover:not(:disabled){box-shadow:0 0 32px rgba(0,245,139,.35);transform:translateY(-1px)}.auth-submit:disabled{opacity:.6;cursor:wait}.auth-submit b{font-size:1.25rem;font-weight:500}.auth-divider{display:flex;align-items:center;gap:12px;margin:22px 0 13px;color:var(--faint);font:500 .57rem 'DM Mono',monospace}.auth-divider:before,.auth-divider:after{height:1px;flex:1;background:var(--line);content:''}.wallet-connect{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;height:39px;border:1px solid rgba(168,85,247,.32);border-radius:8px;background:rgba(168,85,247,.07);color:#d5b3ff;font-size:.63rem;font-weight:700}.wallet-connect:hover{background:rgba(168,85,247,.13);border-color:rgba(168,85,247,.55)}.wallet-connect span{font-size:1rem}.wallet-connect b{margin-left:auto;margin-right:12px;font-size:1rem}.auth-switch{margin:25px 0 0;color:var(--muted);font-size:.68rem;text-align:center}.auth-switch a{color:var(--accent);font-weight:800;text-decoration:none}.auth-switch a span{margin-left:4px;font-size:1rem}
 </style>

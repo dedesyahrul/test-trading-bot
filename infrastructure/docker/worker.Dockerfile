@@ -12,4 +12,6 @@ RUN PIP_REQUIRE_HASHES=0 PIP_CONFIG_FILE=/dev/null pip install --no-cache-dir -r
 
 COPY . .
 
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+
 CMD ["python", "-m", "arq", "app.workers.main.WorkerSettings"]

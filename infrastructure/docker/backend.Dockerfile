@@ -13,6 +13,9 @@ RUN PIP_REQUIRE_HASHES=0 PIP_CONFIG_FILE=/dev/null pip install --no-cache-dir -r
 
 COPY . .
 
+# Keep Python output visible in Docker logs and avoid stale bytecode in dev.
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

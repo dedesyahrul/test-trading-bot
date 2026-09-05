@@ -28,6 +28,10 @@ class GeckoTerminalClient:
                 response = await client.get(f"{self.base_url}{path}", params=params, timeout=self.timeout)
                 response.raise_for_status()
                 return response.json()
+        except httpx.HTTPStatusError as exc:
+            level = logger.info if exc.response.status_code == 404 else logger.warning
+            level("GeckoTerminal request unavailable %s: HTTP %s", path, exc.response.status_code)
+            return None
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("GeckoTerminal request failed %s: %s", path, type(exc).__name__)
             return None

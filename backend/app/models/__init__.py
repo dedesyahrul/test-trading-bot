@@ -59,6 +59,7 @@ class Token(Base):
     symbol = Column(String(20), nullable=False)
     name = Column(String(255))
     decimals = Column(Integer, default=18)
+    developer_address = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     __table_args__ = (
@@ -327,3 +328,8 @@ class TradeDecision(Base):
     features = Column(JSON, default={})
     reasons = Column(JSON, default=[])
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+# Register the audit model with SQLAlchemy/Alembic.
+from app.models.security_audit_log import SecurityAuditLog  # noqa: E402,F401
+from app.models.scam_registry import ScamRegistry  # noqa: E402,F401
