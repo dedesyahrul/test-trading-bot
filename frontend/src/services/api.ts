@@ -52,6 +52,8 @@ export const marketService = {
   getPairsPage: (params: { page?: number; page_size?: number; search?: string; risk_level?: string; sort_by?: string; sort_dir?: string }) =>
     apiClient.get('/market/pairs/page', { params }),
 
+  getTerminalPairs: () => apiClient.get('/market/pairs', { params: { watched_only: true } }),
+
   getPairSnapshots: (pairId: string, limit?: number) =>
     apiClient.get(`/market/pairs/${pairId}/snapshots`, { params: { limit } }),
 

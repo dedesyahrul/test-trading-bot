@@ -3,7 +3,9 @@ import { defineStore } from 'pinia'
 
 interface WSMessage {
   type: string
+  topic?: string
   data?: any
+  payload?: any
   timestamp?: string
 }
 
@@ -17,7 +19,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
   let manuallyDisconnected = false
   let reconnectAttempts = 0
   const maxReconnectAttempts = 5
-  const reconnectDelay = 3000
+  const reconnectBaseDelay = 1000
 
   const connect = (url: string = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`) => {
     if (ws && connected.value) return
@@ -38,11 +40,14 @@ export const useWebSocketStore = defineStore('websocket', () => {
       }
 
       ws.onmessage = (event) => {
-        const message: WSMessage = JSON.parse(event.data)
-        messages.value.push(message)
-        // Keep only last 100 messages
-        if (messages.value.length > 100) {
-          messages.value.shift()
+        try {
+          const message: WSMessage = JSON.parse(event.data)
+          if (!message || typeof message.type !== 'string') return
+          messages.value.push(message)
+          // Keep only last 100 messages.
+          if (messages.value.length > 100) messages.value.shift()
+        } catch (error) {
+          console.warn('Ignoring malformed WebSocket message', error)
         }
       }
 
@@ -66,7 +71,8 @@ export const useWebSocketStore = defineStore('websocket', () => {
     if (reconnectAttempts < maxReconnectAttempts) {
       reconnectAttempts++
       console.log(`Reconnecting... Attempt ${reconnectAttempts}/${maxReconnectAttempts}`)
-      reconnectTimer = setTimeout(() => connect(url), reconnectDelay)
+      const delay = Math.min(reconnectBaseDelay * 2 ** (reconnectAttempts - 1), 30000)
+      reconnectTimer = setTimeout(() => connect(url), delay)
     } else {
       console.error('Max reconnect attempts reached')
     }

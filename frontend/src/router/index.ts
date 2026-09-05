@@ -39,6 +39,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/terminal',
+    name: 'LiveTerminal',
+    component: () => import('../pages/LiveTerminal.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('../pages/Settings.vue'),
